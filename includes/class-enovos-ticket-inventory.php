@@ -147,6 +147,7 @@ final class TicketInventory {
             self::sync_product_stock($product_id);
         }
         self::sync_order_meta($order);
+        AttachMe::sync_order($order);
     }
 
     private static function sync_order_meta(\WC_Order $order): void {

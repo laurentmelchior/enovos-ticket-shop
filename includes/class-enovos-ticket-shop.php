@@ -46,7 +46,9 @@ final class Plugin {
         add_action('woocommerce_order_status_cancelled', [$this, 'release_order']);
         add_action('woocommerce_order_status_failed', [$this, 'release_order']);
         add_action('woocommerce_order_status_refunded', [$this, 'refund_order']);
-        add_filter('woocommerce_email_attachments', [$this, 'email_attachments'], 20, 4);
+        // Run late so Attach Me! / other attachment plugins can merge first.
+        add_filter('woocommerce_email_attachments', [$this, 'email_attachments'], 999, 4);
+        add_action('enovos_ticket_shop_sync_attach_me', ['\Enovos\TicketShop\AttachMe', 'handle_scheduled'], 10, 1);
     }
 
     private function maybe_upgrade(): void {
@@ -109,6 +111,7 @@ final class Plugin {
         echo '<div class="wrap"><h1>Enovos Concert Ticket Shop Importer</h1>';
         echo '<p><strong>Version:</strong> ' . esc_html(ENOVOS_TICKET_SHOP_VERSION) . ' | WordPress 6.4+ | PHP 8.0+</p>';
         echo '<p><strong>Selected AI provider:</strong> ' . esc_html(ucfirst($settings['ai_provider'])) . ' | <strong>PDF package engine:</strong> ' . esc_html($engine['message']) . '</p>';
+        echo '<p><strong>Attach Me!:</strong> ' . (AttachMe::is_active() ? '<span style="color:green">Detected – ticket PDFs are registered on the order Attachments box</span>' : '<span style="color:#996800">Not detected – tickets are attached directly to WooCommerce emails</span>') . '</p>';
         echo '<p><strong>Sales logic:</strong> 2 physical ticket pages = 1 protected ticket PDF package = 1 WooCommerce stock unit. Product price = verified one-ticket public price rounded upward to a full EUR amount.</p>';
 
         $this->render_log();
@@ -209,7 +212,7 @@ final class Plugin {
         $this->field('Custom AI Model', 'custom_ai_model', $s['custom_ai_model']);
         echo '<tr><th>Custom AI Authentication</th><td><select name="enovos_ticket_shop_settings[custom_ai_auth_type]"><option value="bearer" ' . selected($s['custom_ai_auth_type'],'bearer',false) . '>Bearer token</option><option value="api_key_header" ' . selected($s['custom_ai_auth_type'],'api_key_header',false) . '>API key header</option><option value="none" ' . selected($s['custom_ai_auth_type'],'none',false) . '>None</option></select></td></tr>';
         $this->field('Custom AI API Key Header', 'custom_ai_auth_header', $s['custom_ai_auth_header']);
-        echo '<tr><th>Ticket delivery status</th><td><select name="enovos_ticket_shop_settings[delivery_order_status]"><option value="processing" ' . selected($s['delivery_order_status'],'processing',false) . '>Processing</option><option value="completed" ' . selected($s['delivery_order_status'],'completed',false) . '>Completed</option></select><p class="description">Ticket PDFs are attached to the matching customer order email. The same file remains assigned to the order for later emails.</p></td></tr>';
+        echo '<tr><th>Ticket delivery status</th><td><select name="enovos_ticket_shop_settings[delivery_order_status]"><option value="processing" ' . selected($s['delivery_order_status'],'processing',false) . '>Processing</option><option value="completed" ' . selected($s['delivery_order_status'],'completed',false) . '>Completed</option></select><p class="description">Preferred customer email for ticket delivery. Tickets are still sent if payment skips to the other status. When <strong>Attach Me!</strong> is active, ticket PDFs are also registered in the order Attachments box and embedded through Attach Me!.</p></td></tr>';
         echo '<tr><th>Publish products</th><td><label><input type="checkbox" name="enovos_ticket_shop_settings[publish_products]" value="1" ' . checked(1,$s['publish_products'],false) . '> publish immediately</label><p class="description">Products are drafts by default.</p></td></tr>';
         echo '</table><p class="submit"><button class="button button-primary">Save settings</button></p></form></div>';
     }
@@ -378,16 +381,54 @@ final class Plugin {
     }
 
     public function email_attachments(array $attachments, string $email_id, $object, $email = null): array {
-        if (!$object instanceof \WC_Order) return $attachments;
+        if (!$object instanceof \WC_Order) {
+            return $attachments;
+        }
+
+        // Ensure packages exist before deciding how to deliver them.
+        TicketInventory::reserve_for_order($object);
+        AttachMe::sync_order($object);
+
         $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), self::defaults());
-        $status = $settings['delivery_order_status'];
-        $allowed_email = $status === 'completed' ? 'customer_completed_order' : 'customer_processing_order';
-        if ($email_id !== $allowed_email) return $attachments;
+        $status = $settings['delivery_order_status'] ?? 'processing';
+        $allowed = ['customer_processing_order', 'customer_completed_order'];
+        // Prefer the configured status, but still deliver on the other customer
+        // order email if payment gateways skip Processing.
+        if ($status === 'completed') {
+            $allowed = ['customer_completed_order', 'customer_processing_order'];
+        }
+        if (!in_array($email_id, $allowed, true)) {
+            return $attachments;
+        }
+
+        // When Attach Me! already owns email embedding for this order, avoid
+        // duplicate PDF attachments in the same message.
+        if (AttachMe::is_active() && $object->get_meta('_enovos_wcam_synced_package_ids')) {
+            Logger::log('STEP', 'Ticket PDFs left to Attach Me! email embedding', [
+                'order_id' => $object->get_id(),
+                'email_id' => $email_id,
+            ]);
+            TicketInventory::mark_delivered($object->get_id());
+            return $attachments;
+        }
+
         $paths = TicketInventory::attachments_for_order($object);
-        if (!$paths) return $attachments;
-        foreach ($paths as $path) $attachments[] = $path;
+        if (!$paths) {
+            Logger::log('FAIL', 'No ticket PDF paths available for customer email', [
+                'order_id' => $object->get_id(),
+                'email_id' => $email_id,
+            ]);
+            return $attachments;
+        }
+        foreach ($paths as $path) {
+            $attachments[] = $path;
+        }
         TicketInventory::mark_delivered($object->get_id());
-        Logger::log('OK', 'Ticket PDFs attached to WooCommerce customer email', ['order_id'=>$object->get_id(), 'email_id'=>$email_id, 'attachments'=>count($paths)]);
+        Logger::log('OK', 'Ticket PDFs attached to WooCommerce customer email', [
+            'order_id' => $object->get_id(),
+            'email_id' => $email_id,
+            'attachments' => count($paths),
+        ]);
         return array_values(array_unique($attachments));
     }
 }
