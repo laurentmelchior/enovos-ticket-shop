@@ -116,12 +116,18 @@ final class PdfPackages {
         return $result;
     }
 
-    private static function protect_directory(string $dir): void {
+    public static function protect_directory(string $dir): void {
         $htaccess = trailingslashit($dir) . '.htaccess';
-        if (!file_exists($htaccess)) @file_put_contents($htaccess, "Require all denied\nDeny from all\n");
+        if (!file_exists($htaccess)) {
+            @file_put_contents($htaccess, "Require all denied\nDeny from all\n");
+        }
         $webconfig = trailingslashit($dir) . 'web.config';
-        if (!file_exists($webconfig)) @file_put_contents($webconfig, '<?xml version="1.0" encoding="UTF-8"?><configuration><system.webServer><authorization><deny users="*" /></authorization></system.webServer></configuration>');
+        if (!file_exists($webconfig)) {
+            @file_put_contents($webconfig, '<?xml version="1.0" encoding="UTF-8"?><configuration><system.webServer><authorization><deny users="*" /></authorization></system.webServer></configuration>');
+        }
         $index = trailingslashit($dir) . 'index.php';
-        if (!file_exists($index)) @file_put_contents($index, "<?php\n// Silence is golden.\n");
+        if (!file_exists($index)) {
+            @file_put_contents($index, "<?php\n// Silence is golden.\n");
+        }
     }
 }

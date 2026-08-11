@@ -1,5 +1,11 @@
 Enovos Concert Ticket Shop Importer – Changelog
 
+Version 0.3.1 – 2026-08-11
+- Fixed plugin bootstrap: class files now live in `includes/` matching the loader paths (plugin would not start from a flat root layout).
+- Moved the import/debug log into the protected ticket storage tree (`woocommerce_uploads/enovos-ticket-shop/logs/`) with the same deny-all server files.
+- Replaced the invalid `WP_Query` `title` argument in duplicate-product detection with a prepared SQL title + `date_of_concert` lookup.
+- Synced WooCommerce stock quantity from AVAILABLE ticket packages after package creation, reservation, release and refund invalidation.
+
 Version 0.3.0 – 2026-08-11
 - Added a single AI Provider selector: OpenAI, Gemini or Custom AI.
 - Only the selected AI provider is used for PDF analysis, Atelier enrichment and ticket price verification.

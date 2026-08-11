@@ -309,34 +309,35 @@ final class Importer {
     }
 
     private static function find_existing_product(string $title, string $date): int {
-        $date_ymd = str_replace('-', '', $date);
-        $meta_queries = [
-            [
-                'key' => 'date_of_concert',
-                'value' => $date_ymd,
-                'compare' => '=',
-            ],
-            [
-                'key' => 'date_of_concert',
-                'value' => $date,
-                'compare' => '=',
-            ],
-        ];
-
-        foreach ($meta_queries as $meta_query) {
-            $q = new \WP_Query([
-                'post_type' => 'product',
-                'post_status' => ['publish','draft','pending','private'],
-                'posts_per_page' => 1,
-                'fields' => 'ids',
-                'title' => $title,
-                'meta_query' => [$meta_query],
-            ]);
-            if (!empty($q->posts[0])) {
-                return (int) $q->posts[0];
+        global $wpdb;
+        $title = sanitize_text_field($title);
+        if ($title === '') {
+            return 0;
+        }
+        $date_candidates = array_values(array_unique(array_filter([
+            str_replace('-', '', $date),
+            $date,
+        ])));
+        foreach ($date_candidates as $date_value) {
+            $id = (int) $wpdb->get_var($wpdb->prepare(
+                "SELECT p.ID
+                 FROM {$wpdb->posts} p
+                 INNER JOIN {$wpdb->postmeta} pm
+                    ON p.ID = pm.post_id
+                   AND pm.meta_key = 'date_of_concert'
+                   AND pm.meta_value = %s
+                 WHERE p.post_type = 'product'
+                   AND p.post_status IN ('publish','draft','pending','private')
+                   AND p.post_title = %s
+                 ORDER BY p.ID ASC
+                 LIMIT 1",
+                $date_value,
+                $title
+            ));
+            if ($id > 0) {
+                return $id;
             }
         }
-
         return 0;
     }
 

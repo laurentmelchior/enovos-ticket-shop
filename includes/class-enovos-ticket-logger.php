@@ -28,28 +28,20 @@ final class Logger {
         }
         update_option(self::OPTION, $lines, false);
 
-        $upload = wp_upload_dir();
-        if (empty($upload['error']) && !empty($upload['basedir'])) {
-            $dir = trailingslashit($upload['basedir']) . 'enovos-ticket-shop-logs';
-            if (!wp_mkdir_p($dir)) {
-                error_log('[Enovos Ticket Shop] ' . $line);
-                return;
-            }
-            $file = trailingslashit($dir) . 'import.log';
-            @file_put_contents($file, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
-        } else {
+        $dir = self::log_dir();
+        if ($dir === '') {
             error_log('[Enovos Ticket Shop] ' . $line);
+            return;
         }
+        $file = trailingslashit($dir) . 'import.log';
+        @file_put_contents($file, $line . PHP_EOL, FILE_APPEND | LOCK_EX);
     }
 
     public static function clear(): void {
         delete_option(self::OPTION);
-        $upload = wp_upload_dir();
-        if (empty($upload['error']) && !empty($upload['basedir'])) {
-            $file = trailingslashit($upload['basedir']) . 'enovos-ticket-shop-logs/import.log';
-            if (file_exists($file)) {
-                @unlink($file);
-            }
+        $file = self::path();
+        if ($file !== '' && file_exists($file)) {
+            @unlink($file);
         }
     }
 
@@ -62,11 +54,21 @@ final class Logger {
     }
 
     public static function path(): string {
-        $upload = wp_upload_dir();
-        if (!empty($upload['error']) || empty($upload['basedir'])) {
+        $dir = self::log_dir();
+        if ($dir === '') {
             return '';
         }
-        return trailingslashit($upload['basedir']) . 'enovos-ticket-shop-logs/import.log';
+        return trailingslashit($dir) . 'import.log';
+    }
+
+    private static function log_dir(): string {
+        // Prefer the protected WooCommerce uploads tree used for ticket PDFs.
+        $dir = trailingslashit(PdfPackages::private_base_dir()) . 'logs';
+        if (!is_dir($dir) && !wp_mkdir_p($dir)) {
+            return '';
+        }
+        PdfPackages::protect_directory($dir);
+        return $dir;
     }
 
     private static function redact(array $context): array {

@@ -114,6 +114,7 @@ final class TicketInventory {
 
         update_post_meta($product_id, '_enovos_ticket_packages', count($created_ids));
         update_post_meta($product_id, '_enovos_ticket_import_id', $import_id);
+        self::sync_product_stock($product_id);
         Logger::log('OK', 'Two-ticket PDF packages created', ['product_id' => $product_id, 'packages' => count($created_ids), 'pages' => array_slice($page_numbers, 0, $requested * 2)]);
         return count($created_ids);
     }
@@ -143,6 +144,7 @@ final class TicketInventory {
                 $order->add_order_note(sprintf('Enovos Ticket Shop: ticket package #%d reserved.', $package_id));
                 Logger::log('OK', 'Ticket package reserved for order', ['package_id' => $package_id, 'order_id' => $order->get_id(), 'product_id' => $product_id]);
             }
+            self::sync_product_stock($product_id);
         }
         self::sync_order_meta($order);
     }
@@ -181,27 +183,76 @@ final class TicketInventory {
 
     public static function release_order(int $order_id): void {
         global $wpdb;
+        $product_ids = $wpdb->get_col($wpdb->prepare(
+            "SELECT DISTINCT product_id FROM " . self::table() . " WHERE order_id=%d AND status=%s",
+            $order_id,
+            self::STATUS_RESERVED
+        )) ?: [];
         $now = current_time('mysql');
         $wpdb->query($wpdb->prepare(
             "UPDATE " . self::table() . " SET status=%s, order_id=0, order_item_id=0, reserved_at=NULL, updated_at=%s WHERE order_id=%d AND status=%s",
             self::STATUS_AVAILABLE, $now, $order_id, self::STATUS_RESERVED
         ));
+        foreach (array_map('intval', $product_ids) as $product_id) {
+            if ($product_id > 0) {
+                self::sync_product_stock($product_id);
+            }
+        }
         $order = wc_get_order($order_id);
-        if ($order) self::sync_order_meta($order);
+        if ($order) {
+            self::sync_order_meta($order);
+        }
         Logger::log('STEP', 'Reserved ticket packages released for cancelled/failed order', ['order_id' => $order_id]);
     }
 
     public static function invalidate_refunded_order(int $order_id): void {
         global $wpdb;
+        $product_ids = $wpdb->get_col($wpdb->prepare(
+            "SELECT DISTINCT product_id FROM " . self::table() . " WHERE order_id=%d AND status IN (%s,%s)",
+            $order_id,
+            self::STATUS_DELIVERED,
+            self::STATUS_RESERVED
+        )) ?: [];
         $now = current_time('mysql');
         $wpdb->query($wpdb->prepare(
             "UPDATE " . self::table() . " SET status=%s, updated_at=%s WHERE order_id=%d AND status=%s",
             self::STATUS_INVALIDATED, $now, $order_id, self::STATUS_DELIVERED
         ));
         self::release_order($order_id);
+        foreach (array_map('intval', $product_ids) as $product_id) {
+            if ($product_id > 0) {
+                self::sync_product_stock($product_id);
+            }
+        }
         $order = wc_get_order($order_id);
-        if ($order) self::sync_order_meta($order);
+        if ($order) {
+            self::sync_order_meta($order);
+        }
         Logger::log('STEP', 'Delivered ticket packages invalidated for refunded order', ['order_id' => $order_id]);
+    }
+
+    /**
+     * Keep WooCommerce stock aligned with AVAILABLE ticket packages.
+     * Inventory is the source of truth for sellable units.
+     */
+    public static function sync_product_stock(int $product_id): void {
+        if ($product_id <= 0) {
+            return;
+        }
+        $product = wc_get_product($product_id);
+        if (!$product) {
+            return;
+        }
+        $available = self::counts_for_product($product_id)[self::STATUS_AVAILABLE] ?? 0;
+        $product->set_manage_stock(true);
+        $product->set_stock_quantity($available);
+        $product->set_stock_status($available > 0 ? 'instock' : 'outofstock');
+        $product->save();
+        update_post_meta($product_id, '_enovos_ticket_packages_available', $available);
+        Logger::log('STEP', 'Product stock synced from ticket inventory', [
+            'product_id' => $product_id,
+            'available_packages' => $available,
+        ]);
     }
 
     public static function attachments_for_order(\WC_Order $order): array {
