@@ -8,7 +8,7 @@ if (!defined('ABSPATH')) {
 /**
  * Registers reserved ticket PDFs in WooCommerce Attach Me! (WCAM)
  * so they appear on the order Attachments box / My Account and can be
- * embedded in Processing/Completed emails by Attach Me! itself.
+ * embedded in the Completed customer email by Attach Me! itself.
  */
 final class AttachMe {
     public static function is_active(): bool {
@@ -223,9 +223,20 @@ final class AttachMe {
                 'wc-failed',
                 'wc-checkout-draft',
             ];
-            // Ask Attach Me! to embed the file in Processing and Completed emails.
-            $_POST['wcam-attach-file-to-processing-order-email'][$index] = 'yes';
+            // Ask Attach Me! to embed the file only in the Completed customer email.
+            // Unchecked WCAM checkboxes must be omitted (not sent as "no").
             $_POST['wcam-attach-file-to-complete-order-email'][$index] = 'yes';
+        }
+
+        // Honour plugin setting if an older install still uses Processing.
+        $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), Plugin::defaults());
+        $delivery = $settings['delivery_order_status'] ?? 'completed';
+        if ($delivery === 'processing') {
+            foreach ($items as $offset => $_item) {
+                $index = $next + $offset;
+                unset($_POST['wcam-attach-file-to-complete-order-email'][$index]);
+                $_POST['wcam-attach-file-to-processing-order-email'][$index] = 'yes';
+            }
         }
 
         $manager_id = self::shop_manager_user_id();

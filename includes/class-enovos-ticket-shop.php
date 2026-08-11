@@ -26,7 +26,7 @@ final class Plugin {
             'custom_ai_auth_type' => 'bearer',
             'custom_ai_auth_header' => 'X-API-Key',
             'publish_products' => 0,
-            'delivery_order_status' => 'processing',
+            'delivery_order_status' => 'completed',
             'admin_page_size' => 50,
         ];
     }
@@ -82,8 +82,8 @@ final class Plugin {
         if (!in_array($provider, ['openai','gemini','custom'], true)) $provider = 'openai';
         $auth = sanitize_key($input['custom_ai_auth_type'] ?? 'bearer');
         if (!in_array($auth, ['bearer','api_key_header','none'], true)) $auth = 'bearer';
-        $delivery = sanitize_key($input['delivery_order_status'] ?? 'processing');
-        if (!in_array($delivery, ['processing','completed'], true)) $delivery = 'processing';
+        $delivery = sanitize_key($input['delivery_order_status'] ?? 'completed');
+        if (!in_array($delivery, ['processing','completed'], true)) $delivery = 'completed';
         return [
             'ai_provider' => $provider,
             'openai_api_key' => sanitize_text_field($input['openai_api_key'] ?? ''),
@@ -212,7 +212,7 @@ final class Plugin {
         $this->field('Custom AI Model', 'custom_ai_model', $s['custom_ai_model']);
         echo '<tr><th>Custom AI Authentication</th><td><select name="enovos_ticket_shop_settings[custom_ai_auth_type]"><option value="bearer" ' . selected($s['custom_ai_auth_type'],'bearer',false) . '>Bearer token</option><option value="api_key_header" ' . selected($s['custom_ai_auth_type'],'api_key_header',false) . '>API key header</option><option value="none" ' . selected($s['custom_ai_auth_type'],'none',false) . '>None</option></select></td></tr>';
         $this->field('Custom AI API Key Header', 'custom_ai_auth_header', $s['custom_ai_auth_header']);
-        echo '<tr><th>Ticket delivery status</th><td><select name="enovos_ticket_shop_settings[delivery_order_status]"><option value="processing" ' . selected($s['delivery_order_status'],'processing',false) . '>Processing</option><option value="completed" ' . selected($s['delivery_order_status'],'completed',false) . '>Completed</option></select><p class="description">Preferred customer email for ticket delivery. Tickets are still sent if payment skips to the other status. When <strong>Attach Me!</strong> is active, ticket PDFs are also registered in the order Attachments box and embedded through Attach Me!.</p></td></tr>';
+        echo '<tr><th>Ticket delivery status</th><td><select name="enovos_ticket_shop_settings[delivery_order_status]"><option value="completed" ' . selected($s['delivery_order_status'],'completed',false) . '>Completed</option><option value="processing" ' . selected($s['delivery_order_status'],'processing',false) . '>Processing</option></select><p class="description">Ticket PDFs are sent only with the selected customer order email. Default is <strong>Completed</strong>. When <strong>Attach Me!</strong> is active, PDFs are registered on the order Attachments box and embedded only for that same email.</p></td></tr>';
         echo '<tr><th>Publish products</th><td><label><input type="checkbox" name="enovos_ticket_shop_settings[publish_products]" value="1" ' . checked(1,$s['publish_products'],false) . '> publish immediately</label><p class="description">Products are drafts by default.</p></td></tr>';
         echo '</table><p class="submit"><button class="button button-primary">Save settings</button></p></form></div>';
     }
@@ -390,14 +390,9 @@ final class Plugin {
         AttachMe::sync_order($object);
 
         $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), self::defaults());
-        $status = $settings['delivery_order_status'] ?? 'processing';
-        $allowed = ['customer_processing_order', 'customer_completed_order'];
-        // Prefer the configured status, but still deliver on the other customer
-        // order email if payment gateways skip Processing.
-        if ($status === 'completed') {
-            $allowed = ['customer_completed_order', 'customer_processing_order'];
-        }
-        if (!in_array($email_id, $allowed, true)) {
+        $status = $settings['delivery_order_status'] ?? 'completed';
+        $allowed_email = $status === 'processing' ? 'customer_processing_order' : 'customer_completed_order';
+        if ($email_id !== $allowed_email) {
             return $attachments;
         }
 
