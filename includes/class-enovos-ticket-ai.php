@@ -137,7 +137,7 @@ final class AI {
         $response = wp_remote_get($url, [
             'timeout' => 30,
             'redirection' => 5,
-            'headers' => ['User-Agent' => 'Enovos-Ticket-Shop/0.3.0 WordPress'],
+            'headers' => ['User-Agent' => 'Enovos-Ticket-Shop/' . ENOVOS_TICKET_SHOP_VERSION . ' WordPress'],
         ]);
         if (is_wp_error($response)) {
             Logger::log('FAIL', 'Could not fetch Atelier page for image extraction', ['error' => $response->get_error_message()]);
@@ -190,14 +190,14 @@ final class AI {
         $response = wp_remote_head($url, [
             'timeout' => 20,
             'redirection' => 5,
-            'headers' => ['User-Agent' => 'Enovos-Ticket-Shop/0.3.0 WordPress'],
+            'headers' => ['User-Agent' => 'Enovos-Ticket-Shop/' . ENOVOS_TICKET_SHOP_VERSION . ' WordPress'],
         ]);
         if (is_wp_error($response)) {
             $response = wp_remote_get($url, [
                 'timeout' => 20,
                 'redirection' => 5,
                 'limit_response_size' => 65536,
-                'headers' => ['User-Agent' => 'Enovos-Ticket-Shop/0.3.0 WordPress'],
+                'headers' => ['User-Agent' => 'Enovos-Ticket-Shop/' . ENOVOS_TICKET_SHOP_VERSION . ' WordPress'],
             ]);
         }
         if (is_wp_error($response)) {
