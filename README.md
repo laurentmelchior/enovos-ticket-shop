@@ -43,7 +43,12 @@ The **Ticket Inventory** admin page shows package, source pages, product, order 
 
 ## WooCommerce delivery
 
-A package is reserved for the order. The assigned PDF is attached through WooCommerce's email attachment filter to either the Processing or Completed customer order email, depending on settings. This is compatible with sites that also use attachment-management plugins because it does not replace WooCommerce email handling.
+A package is reserved for the order as soon as the order is created. Ticket PDFs are sent only when the order reaches **Completed** (default):
+
+1. **Attach Me! (preferred when installed):** the reserved ticket PDF is registered in the order Attachments box and embedded only in the Completed customer email.
+2. **Native fallback:** the PDF is attached through WooCommerce's `woocommerce_email_attachments` filter to the Completed customer order email.
+
+The delivery status can still be switched to Processing in AI Settings if needed.
 
 Cancelled or failed orders release only packages that have not been delivered. Refunded delivered packages are invalidated and are not resold automatically.
 

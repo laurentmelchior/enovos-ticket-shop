@@ -1,5 +1,16 @@
 Enovos Concert Ticket Shop Importer – Changelog
 
+Version 0.3.3 – 2026-08-11
+- Ticket PDFs are delivered only on the Completed customer order email by default.
+- Attach Me! embedding is limited to the Completed email (Processing email embedding disabled).
+- Default "Ticket delivery status" setting changed from Processing to Completed.
+
+Version 0.3.2 – 2026-08-11
+- Added WooCommerce Attach Me! integration: reserved ticket PDFs are registered in the order Attachments box via WCAM's `upload_attachments` flow.
+- Attach Me! email embedding is enabled for Processing and Completed customer emails; native WooCommerce attachments are skipped for those orders to avoid duplicates.
+- Native email attachment now runs at priority 999 and also covers both Processing and Completed customer emails when Attach Me! is not used.
+- Dashboard shows whether Attach Me! was detected.
+
 Version 0.3.1 – 2026-08-11
 - Fixed plugin bootstrap: class files now live in `includes/` matching the loader paths (plugin would not start from a flat root layout).
 - Moved the import/debug log into the protected ticket storage tree (`woocommerce_uploads/enovos-ticket-shop/logs/`) with the same deny-all server files.
