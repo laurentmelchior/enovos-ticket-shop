@@ -56,6 +56,10 @@ final class Plugin {
         if (version_compare($stored, ENOVOS_TICKET_SHOP_VERSION, '>=')) return;
         $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), self::defaults());
         if (empty($settings['ai_provider'])) $settings['ai_provider'] = 'openai';
+        // v0.3.3+: deliver ticket PDFs only when the order is Completed.
+        if (version_compare($stored, '0.3.3', '<')) {
+            $settings['delivery_order_status'] = 'completed';
+        }
         update_option('enovos_ticket_shop_settings', $settings, false);
         TicketInventory::install();
         update_option('enovos_ticket_shop_version', ENOVOS_TICKET_SHOP_VERSION, false);
