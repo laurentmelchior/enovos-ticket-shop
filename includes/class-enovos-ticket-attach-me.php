@@ -195,8 +195,6 @@ final class AttachMe {
      */
     private static function register_gallery_attachments(int $order_id, array $items): bool {
         $next = self::next_index($order_id);
-        $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), Plugin::defaults());
-        $delivery = $settings['delivery_order_status'] ?? 'processing';
 
         $backup_post = $_POST;
         $backup_files = $_FILES;
@@ -225,12 +223,9 @@ final class AttachMe {
                 'wc-failed',
                 'wc-checkout-draft',
             ];
-            // Ask Attach Me! to embed the file in the configured customer email(s).
+            // Ask Attach Me! to embed the file in Processing and Completed emails.
             $_POST['wcam-attach-file-to-processing-order-email'][$index] = 'yes';
             $_POST['wcam-attach-file-to-complete-order-email'][$index] = 'yes';
-            if ($delivery === 'completed') {
-                $_POST['wcam-attach-file-to-complete-order-email'][$index] = 'yes';
-            }
         }
 
         $manager_id = self::shop_manager_user_id();
@@ -265,7 +260,6 @@ final class AttachMe {
             // Attach Me! re-renders the attachments metabox HTML on success.
             $ok = $response !== '' && (
                 str_contains($response, 'wcam-attachments-box')
-                || str_contains($response, 'wcam-attachment-box')
                 || str_contains($response, 'wcam-attachment-box')
                 || str_contains($response, 'data-already-uploaded')
             );
