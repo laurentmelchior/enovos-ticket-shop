@@ -144,7 +144,8 @@ final class TicketInventory {
                 $order->add_order_note(sprintf('Enovos Ticket Shop: ticket package #%d reserved.', $package_id));
                 Logger::log('OK', 'Ticket package reserved for order', ['package_id' => $package_id, 'order_id' => $order->get_id(), 'product_id' => $product_id]);
             }
-            self::sync_product_stock($product_id);
+            // Do not sync WooCommerce stock here – WC already decrements on order.
+            // Syncing would double-reduce stock (sync to AVAILABLE, then WC −1 again).
         }
         self::sync_order_meta($order);
         AttachMe::sync_order($order);
@@ -294,8 +295,73 @@ final class TicketInventory {
         $rows = $wpdb->get_results($wpdb->prepare("SELECT status,COUNT(*) AS c FROM " . self::table() . " WHERE product_id=%d GROUP BY status", $product_id), ARRAY_A);
         $out = [self::STATUS_AVAILABLE => 0, self::STATUS_RESERVED => 0, self::STATUS_DELIVERED => 0, self::STATUS_INVALIDATED => 0];
         foreach ($rows as $row) {
-            $out[$row['status']] = (int)$row['c'];
+            $out[$row['status']] = (int) $row['c'];
         }
         return $out;
+    }
+
+    /**
+     * Delete a ticket package row and its PDF file.
+     * RESERVED packages assigned to an open order cannot be deleted.
+     */
+    public static function delete_package(int $package_id) {
+        global $wpdb;
+        if ($package_id <= 0) {
+            return new \WP_Error('invalid_package', 'Invalid ticket package ID.');
+        }
+        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . self::table() . " WHERE id = %d", $package_id), ARRAY_A);
+        if (!$row) {
+            return new \WP_Error('package_missing', 'Ticket package not found.');
+        }
+        if ($row['status'] === self::STATUS_RESERVED && (int) $row['order_id'] > 0) {
+            return new \WP_Error(
+                'package_reserved',
+                sprintf('Package #%d is RESERVED for order #%d and cannot be deleted. Cancel/fail the order first, or wait until it is released.', $package_id, (int) $row['order_id'])
+            );
+        }
+
+        $product_id = (int) $row['product_id'];
+        $path = (string) $row['pdf_path'];
+        $deleted = $wpdb->delete(self::table(), ['id' => $package_id], ['%d']);
+        if (!$deleted) {
+            return new \WP_Error('package_delete_failed', 'The ticket package row could not be deleted.');
+        }
+        if ($path !== '' && is_file($path)) {
+            @unlink($path);
+        }
+        if ($product_id > 0) {
+            $counts = self::counts_for_product($product_id);
+            $remaining = array_sum($counts);
+            update_post_meta($product_id, '_enovos_ticket_packages', $remaining);
+            self::sync_product_stock($product_id);
+        }
+        Logger::log('OK', 'Ticket package deleted from inventory', [
+            'package_id' => $package_id,
+            'product_id' => $product_id,
+            'status' => $row['status'],
+            'pdf_removed' => ($path !== '' && !is_file($path)),
+        ]);
+        return true;
+    }
+
+    /**
+     * @param list<int> $package_ids
+     * @return array{deleted:int,errors:list<string>}
+     */
+    public static function delete_packages(array $package_ids): array {
+        $deleted = 0;
+        $errors = [];
+        foreach (array_unique(array_map('intval', $package_ids)) as $id) {
+            if ($id <= 0) {
+                continue;
+            }
+            $result = self::delete_package($id);
+            if (is_wp_error($result)) {
+                $errors[] = $result->get_error_message();
+            } else {
+                $deleted++;
+            }
+        }
+        return ['deleted' => $deleted, 'errors' => $errors];
     }
 }

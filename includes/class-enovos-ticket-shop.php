@@ -38,6 +38,7 @@ final class Plugin {
         add_action('admin_post_enovos_ticket_analyze', [$this, 'handle_analyze']);
         add_action('admin_post_enovos_ticket_import', [$this, 'handle_import']);
         add_action('admin_post_enovos_ticket_clear_log', [$this, 'handle_clear_log']);
+        add_action('admin_post_enovos_ticket_delete_packages', [$this, 'handle_delete_packages']);
 
         add_action('woocommerce_checkout_order_created', [$this, 'reserve_order']);
         add_action('woocommerce_order_status_pending', [$this, 'reserve_order_by_id']);
@@ -184,18 +185,110 @@ final class Plugin {
     }
 
     public function render_inventory(): void {
-        if (!current_user_can('manage_woocommerce')) return;
-        $rows = TicketInventory::rows(500);
-        echo '<div class="wrap"><h1>Ticket Inventory</h1>';
-        echo '<p>Every row is one protected PDF containing exactly two physical ticket pages.</p>';
-        echo '<table class="widefat striped"><thead><tr><th>ID</th><th>Concert</th><th>Date</th><th>Package</th><th>PDF pages</th><th>Status</th><th>Product</th><th>Order</th><th>Reserved</th><th>Delivered</th></tr></thead><tbody>';
-        if (!$rows) echo '<tr><td colspan="10"><em>No ticket packages yet.</em></td></tr>';
-        foreach ($rows as $row) {
-            $product_link = $row['product_id'] ? admin_url('post.php?post=' . (int)$row['product_id'] . '&action=edit') : '';
-            $order_link = $row['order_id'] ? admin_url('admin.php?page=wc-orders&action=edit&id=' . (int)$row['order_id']) : '';
-            echo '<tr><td>' . esc_html((string)$row['id']) . '</td><td>' . esc_html($row['concert_title']) . '</td><td>' . esc_html($row['concert_date']) . '</td><td>' . esc_html((string)$row['package_no']) . '</td><td>' . esc_html($row['ticket_pages']) . '</td><td><strong>' . esc_html($row['status']) . '</strong></td><td>' . ($product_link ? '<a href="' . esc_url($product_link) . '">#' . esc_html((string)$row['product_id']) . '</a>' : '—') . '</td><td>' . ($order_link ? '<a href="' . esc_url($order_link) . '">#' . esc_html((string)$row['order_id']) . '</a>' : '—') . '</td><td>' . esc_html($row['reserved_at'] ?: '—') . '</td><td>' . esc_html($row['delivered_at'] ?: '—') . '</td></tr>';
+        if (!current_user_can('manage_woocommerce')) {
+            return;
         }
-        echo '</tbody></table></div>';
+        $rows = TicketInventory::rows(500);
+        $notice = get_transient('enovos_ticket_shop_inventory_notice_' . get_current_user_id());
+        if ($notice) {
+            delete_transient('enovos_ticket_shop_inventory_notice_' . get_current_user_id());
+        }
+
+        echo '<div class="wrap"><h1>Ticket Inventory</h1>';
+        echo '<p>Every row is one protected PDF containing exactly two physical ticket pages. Deleting a row removes the inventory record and the PDF file. RESERVED packages linked to an open order cannot be deleted.</p>';
+        if (is_array($notice)) {
+            $class = !empty($notice['errors']) ? 'notice-warning' : 'notice-success';
+            echo '<div class="notice ' . esc_attr($class) . ' is-dismissible"><p>' . esc_html((string) ($notice['message'] ?? '')) . '</p>';
+            if (!empty($notice['errors']) && is_array($notice['errors'])) {
+                echo '<ul>';
+                foreach ($notice['errors'] as $error) {
+                    echo '<li>' . esc_html((string) $error) . '</li>';
+                }
+                echo '</ul>';
+            }
+            echo '</div>';
+        }
+
+        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '" onsubmit="return confirm(\'Delete the selected ticket package PDF(s)? This cannot be undone.\');">';
+        echo '<input type="hidden" name="action" value="enovos_ticket_delete_packages">';
+        wp_nonce_field('enovos_ticket_delete_packages');
+        echo '<p><button type="submit" class="button button-secondary">Delete selected packages</button></p>';
+        echo '<table class="widefat striped"><thead><tr><th style="width:36px"><input type="checkbox" id="enovos-inventory-select-all"></th><th>ID</th><th>Concert</th><th>Date</th><th>Package</th><th>PDF pages</th><th>PDF size</th><th>Status</th><th>Product</th><th>Order</th><th>Reserved</th><th>Delivered</th><th>Delete</th></tr></thead><tbody>';
+        if (!$rows) {
+            echo '<tr><td colspan="13"><em>No ticket packages yet.</em></td></tr>';
+        }
+        foreach ($rows as $row) {
+            $package_id = (int) $row['id'];
+            $product_link = $row['product_id'] ? admin_url('post.php?post=' . (int) $row['product_id'] . '&action=edit') : '';
+            $order_link = $row['order_id'] ? admin_url('admin.php?page=wc-orders&action=edit&id=' . (int) $row['order_id']) : '';
+            $size_label = '—';
+            if (!empty($row['pdf_path']) && is_readable($row['pdf_path'])) {
+                $bytes = (int) filesize($row['pdf_path']);
+                $size_label = $bytes >= 1048576
+                    ? number_format_i18n($bytes / 1048576, 1) . ' MB'
+                    : number_format_i18n($bytes / 1024, 0) . ' KB';
+            }
+            $can_delete = !($row['status'] === TicketInventory::STATUS_RESERVED && (int) $row['order_id'] > 0);
+            $single_url = wp_nonce_url(
+                admin_url('admin-post.php?action=enovos_ticket_delete_packages&package_ids[]=' . $package_id),
+                'enovos_ticket_delete_packages'
+            );
+            echo '<tr>';
+            echo '<td>';
+            if ($can_delete) {
+                echo '<input type="checkbox" class="enovos-inventory-check" name="package_ids[]" value="' . esc_attr((string) $package_id) . '">';
+            }
+            echo '</td>';
+            echo '<td>' . esc_html((string) $package_id) . '</td>';
+            echo '<td>' . esc_html($row['concert_title']) . '</td>';
+            echo '<td>' . esc_html($row['concert_date']) . '</td>';
+            echo '<td>' . esc_html((string) $row['package_no']) . '</td>';
+            echo '<td>' . esc_html($row['ticket_pages']) . '</td>';
+            echo '<td>' . esc_html($size_label) . '</td>';
+            echo '<td><strong>' . esc_html($row['status']) . '</strong></td>';
+            echo '<td>' . ($product_link ? '<a href="' . esc_url($product_link) . '">#' . esc_html((string) $row['product_id']) . '</a>' : '—') . '</td>';
+            echo '<td>' . ($order_link ? '<a href="' . esc_url($order_link) . '">#' . esc_html((string) $row['order_id']) . '</a>' : '—') . '</td>';
+            echo '<td>' . esc_html($row['reserved_at'] ?: '—') . '</td>';
+            echo '<td>' . esc_html($row['delivered_at'] ?: '—') . '</td>';
+            echo '<td>';
+            if ($can_delete) {
+                echo '<a class="button button-small" href="' . esc_url($single_url) . '" onclick="return confirm(\'Delete package #' . esc_js((string) $package_id) . ' and its PDF?\');">Delete</a>';
+            } else {
+                echo '<span class="description">Reserved</span>';
+            }
+            echo '</td></tr>';
+        }
+        echo '</tbody></table>';
+        echo '<p><button type="submit" class="button button-secondary">Delete selected packages</button></p>';
+        echo '</form>';
+        echo '<script>(function(){var a=document.getElementById("enovos-inventory-select-all");if(!a)return;a.addEventListener("change",function(){document.querySelectorAll(".enovos-inventory-check").forEach(function(x){x.checked=a.checked;});});})();</script>';
+        echo '</div>';
+    }
+
+    public function handle_delete_packages(): void {
+        if (!current_user_can('manage_woocommerce')) {
+            wp_die('Unauthorized');
+        }
+        check_admin_referer('enovos_ticket_delete_packages');
+        $ids = isset($_REQUEST['package_ids']) && is_array($_REQUEST['package_ids'])
+            ? array_map('intval', wp_unslash($_REQUEST['package_ids']))
+            : [];
+        $ids = array_values(array_filter($ids, static fn($id) => $id > 0));
+        if (!$ids) {
+            set_transient('enovos_ticket_shop_inventory_notice_' . get_current_user_id(), [
+                'message' => 'No ticket packages selected.',
+                'errors' => [],
+            ], 60);
+            wp_safe_redirect(admin_url('admin.php?page=enovos-ticket-inventory'));
+            exit;
+        }
+        $result = TicketInventory::delete_packages($ids);
+        set_transient('enovos_ticket_shop_inventory_notice_' . get_current_user_id(), [
+            'message' => sprintf('Deleted %d ticket package(s).', (int) $result['deleted']),
+            'errors' => $result['errors'],
+        ], 60);
+        wp_safe_redirect(admin_url('admin.php?page=enovos-ticket-inventory'));
+        exit;
     }
 
     public function render_settings(): void {
