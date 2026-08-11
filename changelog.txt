@@ -1,0 +1,43 @@
+Enovos Concert Ticket Shop Importer – Changelog
+
+Version 0.3.0 – 2026-08-11
+- Added a single AI Provider selector: OpenAI, Gemini or Custom AI.
+- Only the selected AI provider is used for PDF analysis, Atelier enrichment and ticket price verification.
+- Added configurable Custom AI authentication: Bearer token, custom API-key header or no authentication.
+- Extended AI PDF extraction with exact 1-based PDF page numbers for every detected physical ticket.
+- Ticket counts are derived from actual detected PDF pages, never from printed "Ticket X of Y" totals.
+- The uploaded master ticket PDF is retained in a protected WooCommerce uploads directory for package generation.
+- Added two-ticket PDF package generation: exactly two physical ticket pages form one sellable ticket package.
+- Added a PDF engine status check. Poppler (pdfseparate + pdfunite) is preferred to preserve original ticket pages; PHP Imagick at 300 DPI is the fallback.
+- Added Ticket Inventory database table and admin page.
+- Ticket package states: AVAILABLE, RESERVED, DELIVERED and INVALIDATED.
+- Added safe package reservation per WooCommerce order and order item.
+- Reserved packages are released for cancelled or failed orders.
+- Delivered packages are invalidated after refund and are never automatically resold.
+- Added WooCommerce customer email attachment integration for the assigned two-ticket PDF packages.
+- Added setting to deliver tickets on Processing or Completed customer email.
+- Added order notes for package reservations.
+- Added import validation so manual Product quantity cannot exceed the actual number of complete two-ticket PDF packages.
+- Added import check columns for detected PDF pages, available packages, image state and import readiness.
+- If PDF package generation fails after product creation, the product is forced to Draft and Out of stock.
+- Existing product behavior, den-atelier category assignment, VAT 3%, Sold individually, ACF mapping, verified one-ticket pricing, upward price rounding and artist/group featured image remain active.
+- Requires WordPress 6.4+ and PHP 8.0+.
+
+Version 0.2.2
+- Verified ticket prices are rounded upward to the next full EUR amount.
+- Product quantity can be adjusted manually in the import check.
+
+Version 0.2.1
+- Improved artist/group product featured image handling.
+
+Version 0.2.0
+- Added den-atelier product category assignment and post-analysis import check.
+
+Version 0.1.9
+- Improved ACF more_about_concert link field mapping.
+
+Version 0.1.8
+- Fixed WooCommerce WC_Tax namespace usage.
+
+Version 0.1.7
+- Strengthened mandatory positive ticket price verification.
