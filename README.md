@@ -39,7 +39,9 @@ The plugin preserves the imported master PDF in protected storage. During produc
 - `DELIVERED`
 - `INVALIDATED`
 
-The **Ticket Inventory** admin page shows package, source pages, product, order and delivery state.
+The **Ticket Inventory** admin page shows package, source pages, PDF size, product, order and delivery state. Admins can delete selected packages (DB row + PDF file). Packages that are `RESERVED` for an open order cannot be deleted until the order is cancelled/failed.
+
+Poppler (`pdfseparate` + `pdfunite`) is preferred so package PDFs stay small. The Imagick fallback uses 150 DPI JPEG compression and should only be used when Poppler is unavailable.
 
 ## WooCommerce delivery
 
