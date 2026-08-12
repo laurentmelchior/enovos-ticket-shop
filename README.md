@@ -22,13 +22,28 @@ WordPress / WooCommerce plugin for importing concert ticket PDFs into products a
 
 ## AI provider
 
-Choose exactly one provider in **Enovos Tickets > AI Settings**:
+Choose exactly one provider in **Enovos Tickets > Settings**:
 
 - OpenAI
 - Gemini
 - Custom AI
 
 Only the selected provider is called. Custom AI supports Bearer authentication, a configurable API-key header, or no authentication.
+
+## Settings toggles
+
+Under **Enovos Tickets > Settings** you can also enable/disable:
+
+- Publish products immediately (otherwise drafts)
+- Attach Me! sync when the plugin is available
+- Native WooCommerce email PDF attachment
+- Atelier enrichment during analysis
+- Import / Debug Log panel on the dashboard
+- Last import result panel
+- Writing new debug log entries
+- Auto-selecting ready concerts in the import check
+- Ticket delivery on Completed or Processing customer email
+- Admin list size (inventory rows + log lines)
 
 ## Ticket inventory
 

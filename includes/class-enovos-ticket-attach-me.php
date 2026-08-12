@@ -31,6 +31,10 @@ final class AttachMe {
     }
 
     public static function sync_order(\WC_Order $order): void {
+        $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), Plugin::defaults());
+        if (empty($settings['enable_attach_me'])) {
+            return;
+        }
         if (!self::is_active()) {
             return;
         }

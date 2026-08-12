@@ -1,5 +1,13 @@
 Enovos Concert Ticket Shop Importer – Changelog
 
+Version 0.3.6 – 2026-08-12
+- Redesigned Settings page with card sections, provider-only credential fields, and toggle switches.
+- Redesigned Changelog page as version cards instead of a raw textarea.
+- Added dashboard toggles: show/hide Import Debug Log, last import result, and auto-select ready concerts.
+- Added feature toggles: write debug logging, Attach Me! sync, native email PDF attachment, Atelier enrichment.
+- Renamed admin menu item from "AI Settings" to "Settings".
+- Admin list size now controls Ticket Inventory rows and debug log line count.
+
 Version 0.3.5 – 2026-08-12
 - Ticket package PDFs are saved with the concert name in the filename (e.g. `artist-name-ticket-package-001.pdf`).
 - Attach Me! media copies use the same concert-based naming.

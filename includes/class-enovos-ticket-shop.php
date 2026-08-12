@@ -27,14 +27,31 @@ final class Plugin {
             'custom_ai_auth_header' => 'X-API-Key',
             'publish_products' => 0,
             'delivery_order_status' => 'completed',
-            'admin_page_size' => 50,
+            'admin_page_size' => 200,
+            'show_debug_log' => 1,
+            'show_last_import' => 1,
+            'enable_debug_logging' => 1,
+            'enable_attach_me' => 1,
+            'enable_native_email_attach' => 1,
+            'enable_atelier_enrichment' => 1,
+            'auto_select_ready_events' => 1,
         ];
+    }
+
+    public static function settings(): array {
+        return wp_parse_args(get_option('enovos_ticket_shop_settings', []), self::defaults());
+    }
+
+    public static function enabled(string $key): bool {
+        $settings = self::settings();
+        return !empty($settings[$key]);
     }
 
     private function __construct() {
         $this->maybe_upgrade();
         add_action('admin_menu', [$this, 'admin_menu']);
         add_action('admin_init', [$this, 'register_settings']);
+        add_action('admin_enqueue_scripts', [$this, 'enqueue_admin_assets']);
         add_action('admin_post_enovos_ticket_analyze', [$this, 'handle_analyze']);
         add_action('admin_post_enovos_ticket_import', [$this, 'handle_import']);
         add_action('admin_post_enovos_ticket_clear_log', [$this, 'handle_clear_log']);
@@ -51,6 +68,33 @@ final class Plugin {
         // Run late so Attach Me! / other attachment plugins can merge first.
         add_filter('woocommerce_email_attachments', [$this, 'email_attachments'], 999, 4);
         add_action('enovos_ticket_shop_sync_attach_me', ['\Enovos\TicketShop\AttachMe', 'handle_scheduled'], 10, 1);
+    }
+
+    public function enqueue_admin_assets(string $hook): void {
+        $page = isset($_GET['page']) ? sanitize_key((string) $_GET['page']) : '';
+        if (!in_array($page, [
+            'enovos-ticket-shop',
+            'enovos-ticket-inventory',
+            'enovos-ticket-shop-settings',
+            'enovos-ticket-shop-changelog',
+        ], true)) {
+            return;
+        }
+        wp_enqueue_style(
+            'enovos-ticket-shop-admin',
+            ENOVOS_TICKET_SHOP_URL . 'assets/admin.css',
+            [],
+            ENOVOS_TICKET_SHOP_VERSION
+        );
+        if ($page === 'enovos-ticket-shop-settings') {
+            wp_enqueue_script(
+                'enovos-ticket-shop-settings',
+                ENOVOS_TICKET_SHOP_URL . 'assets/admin-settings.js',
+                [],
+                ENOVOS_TICKET_SHOP_VERSION,
+                true
+            );
+        }
     }
 
     private function maybe_upgrade(): void {
@@ -71,7 +115,7 @@ final class Plugin {
     public function admin_menu(): void {
         add_menu_page('Enovos Ticket Shop', 'Enovos Tickets', 'manage_woocommerce', 'enovos-ticket-shop', [$this, 'render_dashboard'], 'dashicons-tickets-alt', 56);
         add_submenu_page('enovos-ticket-shop', 'Ticket Inventory', 'Ticket Inventory', 'manage_woocommerce', 'enovos-ticket-inventory', [$this, 'render_inventory']);
-        add_submenu_page('enovos-ticket-shop', 'AI Settings', 'AI Settings', 'manage_woocommerce', 'enovos-ticket-shop-settings', [$this, 'render_settings']);
+        add_submenu_page('enovos-ticket-shop', 'Settings', 'Settings', 'manage_woocommerce', 'enovos-ticket-shop-settings', [$this, 'render_settings']);
         add_submenu_page('enovos-ticket-shop', 'Changelog', 'Changelog', 'manage_woocommerce', 'enovos-ticket-shop-changelog', [$this, 'render_changelog']);
     }
 
@@ -85,11 +129,20 @@ final class Plugin {
     public function sanitize_settings(array $input): array {
         $d = self::defaults();
         $provider = sanitize_key($input['ai_provider'] ?? $d['ai_provider']);
-        if (!in_array($provider, ['openai','gemini','custom'], true)) $provider = 'openai';
+        if (!in_array($provider, ['openai', 'gemini', 'custom'], true)) {
+            $provider = 'openai';
+        }
         $auth = sanitize_key($input['custom_ai_auth_type'] ?? 'bearer');
-        if (!in_array($auth, ['bearer','api_key_header','none'], true)) $auth = 'bearer';
+        if (!in_array($auth, ['bearer', 'api_key_header', 'none'], true)) {
+            $auth = 'bearer';
+        }
         $delivery = sanitize_key($input['delivery_order_status'] ?? 'completed');
-        if (!in_array($delivery, ['processing','completed'], true)) $delivery = 'completed';
+        if (!in_array($delivery, ['processing', 'completed'], true)) {
+            $delivery = 'completed';
+        }
+        $bool = static function (array $input, string $key): int {
+            return !empty($input[$key]) ? 1 : 0;
+        };
         return [
             'ai_provider' => $provider,
             'openai_api_key' => sanitize_text_field($input['openai_api_key'] ?? ''),
@@ -101,41 +154,65 @@ final class Plugin {
             'custom_ai_model' => sanitize_text_field($input['custom_ai_model'] ?? ''),
             'custom_ai_auth_type' => $auth,
             'custom_ai_auth_header' => sanitize_text_field($input['custom_ai_auth_header'] ?? 'X-API-Key'),
-            'publish_products' => !empty($input['publish_products']) ? 1 : 0,
+            'publish_products' => $bool($input, 'publish_products'),
             'delivery_order_status' => $delivery,
-            'admin_page_size' => max(10, min(500, (int)($input['admin_page_size'] ?? 50))),
+            'admin_page_size' => max(10, min(500, (int) ($input['admin_page_size'] ?? $d['admin_page_size']))),
+            'show_debug_log' => $bool($input, 'show_debug_log'),
+            'show_last_import' => $bool($input, 'show_last_import'),
+            'enable_debug_logging' => $bool($input, 'enable_debug_logging'),
+            'enable_attach_me' => $bool($input, 'enable_attach_me'),
+            'enable_native_email_attach' => $bool($input, 'enable_native_email_attach'),
+            'enable_atelier_enrichment' => $bool($input, 'enable_atelier_enrichment'),
+            'auto_select_ready_events' => $bool($input, 'auto_select_ready_events'),
         ];
     }
 
     public function render_dashboard(): void {
-        if (!current_user_can('manage_woocommerce')) return;
+        if (!current_user_can('manage_woocommerce')) {
+            return;
+        }
         $analysis = get_transient('enovos_ticket_shop_last_analysis_' . get_current_user_id());
         $last_import = get_transient('enovos_ticket_shop_last_import_' . get_current_user_id());
-        $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), self::defaults());
+        $settings = self::settings();
         $engine = PdfPackages::engine_status();
+        $attach_me_on = AttachMe::is_active() && !empty($settings['enable_attach_me']);
 
-        echo '<div class="wrap"><h1>Enovos Concert Ticket Shop Importer</h1>';
-        echo '<p><strong>Version:</strong> ' . esc_html(ENOVOS_TICKET_SHOP_VERSION) . ' | WordPress 6.4+ | PHP 8.0+</p>';
-        echo '<p><strong>Selected AI provider:</strong> ' . esc_html(ucfirst($settings['ai_provider'])) . ' | <strong>PDF package engine:</strong> ' . esc_html($engine['message']) . '</p>';
-        echo '<p><strong>Attach Me!:</strong> ' . (AttachMe::is_active() ? '<span style="color:green">Detected – ticket PDFs are registered on the order Attachments box</span>' : '<span style="color:#996800">Not detected – tickets are attached directly to WooCommerce emails</span>') . '</p>';
-        echo '<p><strong>Sales logic:</strong> 2 physical ticket pages = 1 protected ticket PDF package = 1 WooCommerce stock unit. Product price = verified one-ticket public price rounded upward to a full EUR amount.</p>';
+        echo '<div class="wrap enovos-admin"><h1>Enovos Concert Ticket Shop</h1>';
+        echo '<p class="enovos-admin-lead">Import concert ticket PDFs, create protected two-ticket packages, and deliver them with WooCommerce orders.</p>';
 
-        $this->render_log();
-        $this->render_last_import($last_import);
-        $this->render_analysis($analysis, $engine);
+        echo '<div class="enovos-status-grid">';
+        echo '<div class="enovos-status-card"><span class="label">Version</span><span class="value">' . esc_html(ENOVOS_TICKET_SHOP_VERSION) . '</span></div>';
+        echo '<div class="enovos-status-card"><span class="label">AI provider</span><span class="value">' . esc_html(ucfirst((string) $settings['ai_provider'])) . '</span></div>';
+        echo '<div class="enovos-status-card"><span class="label">PDF engine</span><span class="value ' . (!empty($engine['available']) ? 'is-ok' : 'is-warn') . '">' . esc_html((string) ($engine['engine'] ?? 'unavailable')) . '</span></div>';
+        echo '<div class="enovos-status-card"><span class="label">Attach Me!</span><span class="value ' . ($attach_me_on ? 'is-ok' : 'is-warn') . '">' . ($attach_me_on ? 'Active' : (AttachMe::is_active() ? 'Disabled in settings' : 'Not installed')) . '</span></div>';
+        echo '<div class="enovos-status-card"><span class="label">Ticket delivery</span><span class="value">' . esc_html(ucfirst((string) $settings['delivery_order_status'])) . '</span></div>';
+        echo '</div>';
 
-        echo '<hr><h2>Analyze a ticket PDF</h2>';
+        echo '<div class="enovos-panel"><p style="margin:0"><strong>Sales logic:</strong> 2 physical ticket pages = 1 protected ticket PDF package = 1 WooCommerce stock unit. Product price = verified one-ticket public price rounded upward to a full EUR amount.</p></div>';
+
+        if (!empty($settings['show_debug_log'])) {
+            $this->render_log((int) $settings['admin_page_size']);
+        }
+        if (!empty($settings['show_last_import'])) {
+            $this->render_last_import($last_import);
+        }
+        $this->render_analysis($analysis, $engine, $settings);
+
+        echo '<div class="enovos-panel"><h2>Analyze a ticket PDF</h2>';
         echo '<form method="post" enctype="multipart/form-data" action="' . esc_url(admin_url('admin-post.php')) . '">';
         echo '<input type="hidden" name="action" value="enovos_ticket_analyze">';
         wp_nonce_field('enovos_ticket_analyze');
-        echo '<input type="file" name="ticket_pdf" accept="application/pdf,.pdf" required> ';
-        echo '<button class="button button-primary" type="submit">Analyze PDF</button></form>';
+        echo '<p><input type="file" name="ticket_pdf" accept="application/pdf,.pdf" required> ';
+        echo '<button class="button button-primary" type="submit">Analyze PDF</button></p></form></div>';
         echo '</div>';
     }
 
-    private function render_analysis($analysis, array $engine): void {
-        if (!$analysis || empty($analysis['consensus'])) return;
-        echo '<h2>Import check</h2>';
+    private function render_analysis($analysis, array $engine, array $settings = []): void {
+        if (!$analysis || empty($analysis['consensus'])) {
+            return;
+        }
+        $auto_select = !empty($settings['auto_select_ready_events']);
+        echo '<div class="enovos-panel"><h2>Import check</h2>';
         echo '<p>Review every concert before import. You can reduce the product quantity manually, but it cannot exceed the number of complete two-ticket packages detected in the PDF.</p>';
         if (empty($engine['available'])) {
             echo '<div class="notice notice-error inline"><p><strong>Ticket PDF generation is blocked:</strong> ' . esc_html($engine['message']) . '</p></div>';
@@ -143,21 +220,21 @@ final class Plugin {
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
         echo '<input type="hidden" name="action" value="enovos_ticket_import">';
         wp_nonce_field('enovos_ticket_import');
-        echo '<p><label><input type="checkbox" id="enovos-select-all" checked> <strong>Select / deselect all</strong></label></p>';
+        echo '<p><label><input type="checkbox" id="enovos-select-all" ' . checked($auto_select, true, false) . '> <strong>Select / deselect all</strong></label></p>';
         echo '<table class="widefat striped"><thead><tr><th>Select</th><th>Concert</th><th>Date</th><th>Detected pages</th><th>Packages available</th><th>Product quantity</th><th>Price</th><th>Atelier</th><th>Image</th><th>Status</th></tr></thead><tbody>';
         foreach ($analysis['consensus'] as $event) {
             $key = $event['_import_key'] ?? $this->event_import_key($event);
-            $pages = array_values(array_filter(array_map('intval', (array)($event['page_numbers'] ?? []))));
+            $pages = array_values(array_filter(array_map('intval', (array) ($event['page_numbers'] ?? []))));
             $possible = intdiv(count($pages), 2);
-            $valid = !empty($engine['available']) && !empty($event['title']) && !empty($event['date']) && !empty($event['atelier_url']) && !empty($event['price_verified']) && (float)($event['price_per_ticket'] ?? 0) > 0 && $possible > 0;
+            $valid = !empty($engine['available']) && !empty($event['title']) && !empty($event['date']) && !empty($event['atelier_url']) && !empty($event['price_verified']) && (float) ($event['price_per_ticket'] ?? 0) > 0 && $possible > 0;
             echo '<tr>';
-            echo '<td><input type="checkbox" class="enovos-import-check" name="selected_events[]" value="' . esc_attr($key) . '" ' . checked($valid, true, false) . ' ' . disabled($valid, false, false) . '></td>';
+            echo '<td><input type="checkbox" class="enovos-import-check" name="selected_events[]" value="' . esc_attr($key) . '" ' . checked($valid && $auto_select, true, false) . ' ' . disabled($valid, false, false) . '></td>';
             echo '<td><strong>' . esc_html($event['title'] ?? '') . '</strong></td>';
             echo '<td>' . esc_html($event['date'] ?? '') . '</td>';
             echo '<td>' . esc_html(count($pages) ? implode(', ', $pages) : 'Missing') . '</td>';
-            echo '<td>' . esc_html((string)$possible) . '</td>';
-            echo '<td><input type="number" min="1" max="' . esc_attr((string)max(1, $possible)) . '" step="1" name="product_quantity[' . esc_attr($key) . ']" value="' . esc_attr((string)max(1, $possible)) . '" style="width:80px" ' . disabled($valid, false, false) . '></td>';
-            echo '<td><strong>' . esc_html(number_format_i18n((float)($event['price_per_ticket'] ?? 0), 2)) . ' €</strong></td>';
+            echo '<td>' . esc_html((string) $possible) . '</td>';
+            echo '<td><input type="number" min="1" max="' . esc_attr((string) max(1, $possible)) . '" step="1" name="product_quantity[' . esc_attr($key) . ']" value="' . esc_attr((string) max(1, $possible)) . '" style="width:80px" ' . disabled($valid, false, false) . '></td>';
+            echo '<td><strong>' . esc_html(number_format_i18n((float) ($event['price_per_ticket'] ?? 0), 2)) . ' €</strong></td>';
             echo '<td>' . (!empty($event['atelier_url']) ? '<a target="_blank" rel="noopener" href="' . esc_url($event['atelier_url']) . '">Open</a>' : 'Missing') . '</td>';
             echo '<td>' . (!empty($event['image_url']) ? '<span style="color:green">Found</span>' : '<span style="color:#996800">Missing</span>') . '</td>';
             echo '<td>' . ($valid ? '<span style="color:green;font-weight:600">Ready</span>' : '<span style="color:#b32d2e;font-weight:600">Blocked</span>') . '</td>';
@@ -165,38 +242,44 @@ final class Plugin {
         }
         echo '</tbody></table><p><button class="button button-primary" type="submit">Import selected products and create ticket packages</button></p></form>';
         echo '<script>(function(){var a=document.getElementById("enovos-select-all");if(!a)return;a.addEventListener("change",function(){document.querySelectorAll(".enovos-import-check:not(:disabled)").forEach(function(x){x.checked=a.checked;});});})();</script>';
+        echo '</div>';
     }
 
     private function render_last_import($last_import): void {
-        if (!$last_import) return;
-        echo '<h2>Last import result</h2>';
-        echo '<p><strong>Selected:</strong> ' . esc_html((string)($last_import['selected'] ?? 0)) . ' | <strong>Imported:</strong> ' . esc_html((string)count($last_import['created'] ?? [])) . ' | <strong>Errors:</strong> ' . esc_html((string)count($last_import['errors'] ?? [])) . '</p>';
+        if (!$last_import) {
+            return;
+        }
+        echo '<div class="enovos-panel"><h2>Last import result</h2>';
+        echo '<p><strong>Selected:</strong> ' . esc_html((string) ($last_import['selected'] ?? 0)) . ' | <strong>Imported:</strong> ' . esc_html((string) count($last_import['created'] ?? [])) . ' | <strong>Errors:</strong> ' . esc_html((string) count($last_import['errors'] ?? [])) . '</p>';
         if (!empty($last_import['created'])) {
             echo '<table class="widefat striped"><thead><tr><th>Product</th><th>ID</th><th>Price</th><th>Stock</th><th>Ticket packages</th><th>Result</th></tr></thead><tbody>';
             foreach ($last_import['created'] as $item) {
-                echo '<tr><td>' . esc_html($item['title'] ?? '') . '</td><td>' . esc_html((string)($item['id'] ?? 0)) . '</td><td>' . esc_html(number_format_i18n((float)($item['price'] ?? 0), 2)) . ' €</td><td>' . esc_html((string)($item['stock'] ?? 0)) . '</td><td>' . esc_html((string)($item['ticket_packages'] ?? 0)) . '</td><td>' . (!empty($item['repaired']) ? 'Updated existing product' : 'Imported') . '</td></tr>';
+                echo '<tr><td>' . esc_html($item['title'] ?? '') . '</td><td>' . esc_html((string) ($item['id'] ?? 0)) . '</td><td>' . esc_html(number_format_i18n((float) ($item['price'] ?? 0), 2)) . ' €</td><td>' . esc_html((string) ($item['stock'] ?? 0)) . '</td><td>' . esc_html((string) ($item['ticket_packages'] ?? 0)) . '</td><td>' . (!empty($item['repaired']) ? 'Updated existing product' : 'Imported') . '</td></tr>';
             }
             echo '</tbody></table>';
         }
         if (!empty($last_import['errors'])) {
             echo '<h3>Import errors</h3><table class="widefat striped"><thead><tr><th>Concert</th><th>Error</th></tr></thead><tbody>';
-            foreach ($last_import['errors'] as $error) echo '<tr><td>' . esc_html($error['event']['title'] ?? '') . '</td><td>' . esc_html($error['error'] ?? '') . '</td></tr>';
+            foreach ($last_import['errors'] as $error) {
+                echo '<tr><td>' . esc_html($error['event']['title'] ?? '') . '</td><td>' . esc_html($error['error'] ?? '') . '</td></tr>';
+            }
             echo '</tbody></table>';
         }
+        echo '</div>';
     }
 
     public function render_inventory(): void {
         if (!current_user_can('manage_woocommerce')) {
             return;
         }
-        $rows = TicketInventory::rows(500);
+        $rows = TicketInventory::rows((int) self::settings()['admin_page_size']);
         $notice = get_transient('enovos_ticket_shop_inventory_notice_' . get_current_user_id());
         if ($notice) {
             delete_transient('enovos_ticket_shop_inventory_notice_' . get_current_user_id());
         }
 
-        echo '<div class="wrap"><h1>Ticket Inventory</h1>';
-        echo '<p>Every row is one protected PDF containing exactly two physical ticket pages. Use Download to save the PDF with the concert name. Deleting a row removes the inventory record and the PDF file. RESERVED packages linked to an open order cannot be deleted.</p>';
+        echo '<div class="wrap enovos-admin"><h1>Ticket Inventory</h1>';
+        echo '<p class="enovos-admin-lead">Every row is one protected PDF containing exactly two physical ticket pages. Use Download to save the PDF with the concert name. Deleting a row removes the inventory record and the PDF file. RESERVED packages linked to an open order cannot be deleted.</p>';
         if (is_array($notice)) {
             $class = !empty($notice['errors']) ? 'notice-warning' : 'notice-success';
             echo '<div class="notice ' . esc_attr($class) . ' is-dismissible"><p>' . esc_html((string) ($notice['message'] ?? '')) . '</p>';
@@ -333,45 +416,164 @@ final class Plugin {
     }
 
     public function render_settings(): void {
-        if (!current_user_can('manage_woocommerce')) return;
-        $s = wp_parse_args(get_option('enovos_ticket_shop_settings', []), self::defaults());
-        echo '<div class="wrap"><h1>Enovos Ticket Shop – AI Settings</h1><form method="post" action="options.php">';
+        if (!current_user_can('manage_woocommerce')) {
+            return;
+        }
+        $s = self::settings();
+        echo '<div class="wrap enovos-admin"><h1>Settings</h1>';
+        echo '<p class="enovos-admin-lead">Configure the AI provider, product delivery behaviour, and which Enovos Tickets admin sections are visible.</p>';
+        echo '<form method="post" action="options.php">';
         settings_fields('enovos_ticket_shop_settings_group');
-        echo '<table class="form-table">';
-        echo '<tr><th><label for="ai_provider">AI Provider</label></th><td><select id="ai_provider" name="enovos_ticket_shop_settings[ai_provider]">';
-        foreach (['openai'=>'OpenAI','gemini'=>'Gemini','custom'=>'Custom AI'] as $value=>$label) echo '<option value="' . esc_attr($value) . '" ' . selected($s['ai_provider'], $value, false) . '>' . esc_html($label) . '</option>';
-        echo '</select><p class="description">Only the selected provider is used for PDF analysis, Atelier enrichment and price verification.</p></td></tr>';
+        echo '<div class="enovos-settings-grid">';
+
+        // AI provider
+        echo '<div class="enovos-card"><div class="enovos-card__header"><h2>AI provider</h2><p>Only the selected provider is used for PDF analysis, Atelier enrichment and price verification.</p></div><div class="enovos-card__body">';
+        echo '<table class="form-table" role="presentation"><tr><th><label for="enovos_ai_provider">Provider</label></th><td><select id="enovos_ai_provider" name="enovos_ticket_shop_settings[ai_provider]">';
+        foreach (['openai' => 'OpenAI', 'gemini' => 'Gemini', 'custom' => 'Custom AI'] as $value => $label) {
+            echo '<option value="' . esc_attr($value) . '" ' . selected($s['ai_provider'], $value, false) . '>' . esc_html($label) . '</option>';
+        }
+        echo '</select></td></tr></table>';
+
+        echo '<div class="enovos-provider-fields" data-enovos-provider="openai"><table class="form-table" role="presentation">';
         $this->field('OpenAI API Key', 'openai_api_key', $s['openai_api_key'], 'password');
         $this->field('OpenAI Model', 'openai_model', $s['openai_model']);
+        echo '</table></div>';
+
+        echo '<div class="enovos-provider-fields" data-enovos-provider="gemini" hidden><table class="form-table" role="presentation">';
         $this->field('Gemini API Key', 'gemini_api_key', $s['gemini_api_key'], 'password');
         $this->field('Gemini Model', 'gemini_model', $s['gemini_model']);
+        echo '</table></div>';
+
+        echo '<div class="enovos-provider-fields" data-enovos-provider="custom" hidden><table class="form-table" role="presentation">';
         $this->field('Custom AI Endpoint', 'custom_ai_endpoint', $s['custom_ai_endpoint']);
         $this->field('Custom AI Token / API Key', 'custom_ai_token', $s['custom_ai_token'], 'password');
         $this->field('Custom AI Model', 'custom_ai_model', $s['custom_ai_model']);
-        echo '<tr><th>Custom AI Authentication</th><td><select name="enovos_ticket_shop_settings[custom_ai_auth_type]"><option value="bearer" ' . selected($s['custom_ai_auth_type'],'bearer',false) . '>Bearer token</option><option value="api_key_header" ' . selected($s['custom_ai_auth_type'],'api_key_header',false) . '>API key header</option><option value="none" ' . selected($s['custom_ai_auth_type'],'none',false) . '>None</option></select></td></tr>';
-        $this->field('Custom AI API Key Header', 'custom_ai_auth_header', $s['custom_ai_auth_header']);
-        echo '<tr><th>Ticket delivery status</th><td><select name="enovos_ticket_shop_settings[delivery_order_status]"><option value="completed" ' . selected($s['delivery_order_status'],'completed',false) . '>Completed</option><option value="processing" ' . selected($s['delivery_order_status'],'processing',false) . '>Processing</option></select><p class="description">Ticket PDFs are sent only with the selected customer order email. Default is <strong>Completed</strong>. When <strong>Attach Me!</strong> is active, PDFs are registered on the order Attachments box and embedded only for that same email.</p></td></tr>';
-        echo '<tr><th>Publish products</th><td><label><input type="checkbox" name="enovos_ticket_shop_settings[publish_products]" value="1" ' . checked(1,$s['publish_products'],false) . '> publish immediately</label><p class="description">Products are drafts by default.</p></td></tr>';
-        echo '</table><p class="submit"><button class="button button-primary">Save settings</button></p></form></div>';
+        echo '<tr><th>Authentication</th><td><select name="enovos_ticket_shop_settings[custom_ai_auth_type]"><option value="bearer" ' . selected($s['custom_ai_auth_type'], 'bearer', false) . '>Bearer token</option><option value="api_key_header" ' . selected($s['custom_ai_auth_type'], 'api_key_header', false) . '>API key header</option><option value="none" ' . selected($s['custom_ai_auth_type'], 'none', false) . '>None</option></select></td></tr>';
+        $this->field('API Key Header name', 'custom_ai_auth_header', $s['custom_ai_auth_header']);
+        echo '</table></div></div></div>';
+
+        // Product & delivery
+        echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Products &amp; delivery</h2><p>How imported products are published and when ticket PDFs leave with the customer email.</p></div><div class="enovos-card__body">';
+        echo '<table class="form-table" role="presentation">';
+        echo '<tr><th>Ticket delivery status</th><td><select name="enovos_ticket_shop_settings[delivery_order_status]"><option value="completed" ' . selected($s['delivery_order_status'], 'completed', false) . '>Completed</option><option value="processing" ' . selected($s['delivery_order_status'], 'processing', false) . '>Processing</option></select><p class="description">Ticket PDFs are sent only with this customer order email.</p></td></tr>';
+        echo '<tr><th>Admin list size</th><td><input class="small-text" type="number" min="10" max="500" name="enovos_ticket_shop_settings[admin_page_size]" value="' . esc_attr((string) $s['admin_page_size']) . '"> <span class="description">Rows shown in Ticket Inventory and lines in the debug log view.</span></td></tr>';
+        echo '</table>';
+        echo '<ul class="enovos-toggle-list">';
+        $this->toggle('publish_products', (int) $s['publish_products'], 'Publish products immediately', 'When off, imported concerts stay as drafts until you publish them.');
+        $this->toggle('enable_attach_me', (int) $s['enable_attach_me'], 'Use Attach Me! when available', 'Register reserved ticket PDFs on the WooCommerce order Attachments box.');
+        $this->toggle('enable_native_email_attach', (int) $s['enable_native_email_attach'], 'Native email PDF attachment', 'Attach ticket PDFs directly to the WooCommerce customer email when Attach Me! is not used.');
+        $this->toggle('enable_atelier_enrichment', (int) $s['enable_atelier_enrichment'], 'Atelier enrichment', 'Fetch artist/group image and extra Atelier page data during PDF analysis.');
+        echo '</ul></div></div>';
+
+        // Admin UI toggles
+        echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Enovos Tickets dashboard</h2><p>Show or hide sections on the main Enovos Tickets page.</p></div><div class="enovos-card__body"><ul class="enovos-toggle-list">';
+        $this->toggle('show_debug_log', (int) $s['show_debug_log'], 'Import / Debug Log', 'Show the processing log panel on the Enovos Tickets dashboard.');
+        $this->toggle('show_last_import', (int) $s['show_last_import'], 'Last import result', 'Show the last import summary table on the dashboard.');
+        $this->toggle('enable_debug_logging', (int) $s['enable_debug_logging'], 'Write debug log entries', 'When off, no new log lines are written (existing log stays until cleared).');
+        $this->toggle('auto_select_ready_events', (int) $s['auto_select_ready_events'], 'Auto-select ready concerts', 'Pre-check concerts that are ready for import in the import check table.');
+        echo '</ul></div></div>';
+
+        echo '</div><div class="enovos-actions-bar"><button class="button button-primary button-large">Save settings</button>';
+        echo '<a class="button button-secondary" href="' . esc_url(admin_url('admin.php?page=enovos-ticket-shop')) . '">Back to Enovos Tickets</a></div>';
+        echo '</form></div>';
     }
 
-    private function field(string $label, string $key, string $value, string $type='text'): void {
-        echo '<tr><th><label for="' . esc_attr($key) . '">' . esc_html($label) . '</label></th><td><input class="regular-text" type="' . esc_attr($type) . '" id="' . esc_attr($key) . '" name="enovos_ticket_shop_settings[' . esc_attr($key) . ']" value="' . esc_attr($value) . '"></td></tr>';
+    private function field(string $label, string $key, string $value, string $type = 'text'): void {
+        echo '<tr><th><label for="' . esc_attr($key) . '">' . esc_html($label) . '</label></th><td><input class="regular-text" type="' . esc_attr($type) . '" id="' . esc_attr($key) . '" name="enovos_ticket_shop_settings[' . esc_attr($key) . ']" value="' . esc_attr($value) . '" autocomplete="off"></td></tr>';
+    }
+
+    private function toggle(string $key, int $value, string $label, string $description): void {
+        $id = 'enovos_toggle_' . $key;
+        echo '<li class="enovos-toggle-item">';
+        echo '<label class="enovos-toggle" for="' . esc_attr($id) . '"><input type="checkbox" id="' . esc_attr($id) . '" name="enovos_ticket_shop_settings[' . esc_attr($key) . ']" value="1" ' . checked(1, $value, false) . '><span></span></label>';
+        echo '<div class="enovos-toggle-copy"><strong>' . esc_html($label) . '</strong><span>' . esc_html($description) . '</span></div>';
+        echo '</li>';
     }
 
     public function render_changelog(): void {
-        if (!current_user_can('manage_woocommerce')) return;
+        if (!current_user_can('manage_woocommerce')) {
+            return;
+        }
         $path = ENOVOS_TICKET_SHOP_DIR . 'changelog.txt';
-        $contents = is_readable($path) ? (string)file_get_contents($path) : 'The changelog file could not be read.';
-        echo '<div class="wrap"><h1>Enovos Ticket Shop – Changelog</h1><p><strong>Current version:</strong> ' . esc_html(ENOVOS_TICKET_SHOP_VERSION) . ' | WordPress 6.4+ | PHP 8.0+</p><textarea readonly style="width:100%;min-height:540px;font-family:monospace">' . esc_textarea($contents) . '</textarea></div>';
+        $contents = is_readable($path) ? (string) file_get_contents($path) : '';
+        $entries = $this->parse_changelog($contents);
+
+        echo '<div class="wrap enovos-admin"><h1>Changelog</h1>';
+        echo '<p class="enovos-admin-lead">Current version <strong>' . esc_html(ENOVOS_TICKET_SHOP_VERSION) . '</strong> · WordPress 6.4+ · PHP 8.0+</p>';
+
+        if (!$entries) {
+            echo '<div class="enovos-panel"><p>The changelog file could not be read.</p>';
+            if ($contents !== '') {
+                echo '<textarea class="enovos-changelog-raw" readonly>' . esc_textarea($contents) . '</textarea>';
+            }
+            echo '</div></div>';
+            return;
+        }
+
+        echo '<div class="enovos-changelog-list">';
+        foreach ($entries as $index => $entry) {
+            $is_current = $index === 0;
+            echo '<article class="enovos-changelog-card' . ($is_current ? ' is-current' : '') . '">';
+            echo '<div class="enovos-changelog-card__head"><h2>Version ' . esc_html($entry['version']) . '</h2>';
+            if ($entry['date'] !== '') {
+                echo '<span class="enovos-changelog-card__date">' . esc_html($entry['date']) . '</span>';
+            }
+            if ($is_current) {
+                echo '<span class="enovos-badge">Current</span>';
+            }
+            echo '</div>';
+            if (!empty($entry['items'])) {
+                echo '<ul>';
+                foreach ($entry['items'] as $item) {
+                    echo '<li>' . esc_html($item) . '</li>';
+                }
+                echo '</ul>';
+            }
+            echo '</article>';
+        }
+        echo '</div></div>';
     }
 
-    private function render_log(): void {
-        echo '<h2>Import / Debug Log</h2><p>This log shows every processing step and failure point.</p>';
-        $lines = Logger::lines(250);
-        echo $lines ? '<textarea readonly style="width:100%;min-height:300px;font-family:monospace">' . esc_textarea(implode("\n", $lines)) . '</textarea>' : '<p><em>No log entries yet.</em></p>';
+    /**
+     * @return list<array{version:string,date:string,items:list<string>}>
+     */
+    private function parse_changelog(string $contents): array {
+        $entries = [];
+        $current = null;
+        foreach (preg_split("/\R/", $contents) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '' || stripos($line, 'Enovos Concert Ticket Shop') === 0) {
+                continue;
+            }
+            if (preg_match('/^Version\s+([0-9.]+)\s*[–—-]\s*(.+)$/u', $line, $m)) {
+                if ($current) {
+                    $entries[] = $current;
+                }
+                $current = [
+                    'version' => $m[1],
+                    'date' => trim($m[2]),
+                    'items' => [],
+                ];
+                continue;
+            }
+            if ($current && preg_match('/^[-*]\s+(.+)$/', $line, $m)) {
+                $current['items'][] = $m[1];
+            }
+        }
+        if ($current) {
+            $entries[] = $current;
+        }
+        return $entries;
+    }
+
+    private function render_log(int $limit = 250): void {
+        echo '<div class="enovos-panel"><h2>Import / Debug Log</h2><p>This log shows every processing step and failure point.</p>';
+        $lines = Logger::lines(max(10, min(500, $limit)));
+        echo $lines
+            ? '<textarea class="enovos-log-box" readonly>' . esc_textarea(implode("\n", $lines)) . '</textarea>'
+            : '<p><em>No log entries yet.</em></p>';
         $url = wp_nonce_url(admin_url('admin-post.php?action=enovos_ticket_clear_log'), 'enovos_ticket_clear_log');
-        echo '<p><a class="button" href="' . esc_url($url) . '">Clear log</a></p>';
+        echo '<p><a class="button" href="' . esc_url($url) . '">Clear log</a></p></div>';
     }
 
     public function handle_clear_log(): void {
@@ -417,7 +619,9 @@ final class Plugin {
         $enriched = [];
         $price_errors = [];
         foreach (($result['consensus'] ?? []) as $event) {
-            $event = AI::enrich_atelier($event, $settings);
+            if (!empty($settings['enable_atelier_enrichment'])) {
+                $event = AI::enrich_atelier($event, $settings);
+            }
             $verified = AI::verify_atelier_price($event, $settings);
             if (is_wp_error($verified)) {
                 $price_errors[] = ['title'=>$event['title'] ?? '', 'error'=>$verified->get_error_message()];
@@ -525,9 +729,11 @@ final class Plugin {
 
         // Ensure packages exist before deciding how to deliver them.
         TicketInventory::reserve_for_order($object);
-        AttachMe::sync_order($object);
+        if (self::enabled('enable_attach_me')) {
+            AttachMe::sync_order($object);
+        }
 
-        $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), self::defaults());
+        $settings = self::settings();
         $status = $settings['delivery_order_status'] ?? 'completed';
         $allowed_email = $status === 'processing' ? 'customer_processing_order' : 'customer_completed_order';
         if ($email_id !== $allowed_email) {
@@ -536,12 +742,24 @@ final class Plugin {
 
         // When Attach Me! already owns email embedding for this order, avoid
         // duplicate PDF attachments in the same message.
-        if (AttachMe::is_active() && $object->get_meta('_enovos_wcam_synced_package_ids')) {
+        if (
+            self::enabled('enable_attach_me')
+            && AttachMe::is_active()
+            && $object->get_meta('_enovos_wcam_synced_package_ids')
+        ) {
             Logger::log('STEP', 'Ticket PDFs left to Attach Me! email embedding', [
                 'order_id' => $object->get_id(),
                 'email_id' => $email_id,
             ]);
             TicketInventory::mark_delivered($object->get_id());
+            return $attachments;
+        }
+
+        if (!self::enabled('enable_native_email_attach')) {
+            Logger::log('STEP', 'Native email PDF attachment disabled in settings', [
+                'order_id' => $object->get_id(),
+                'email_id' => $email_id,
+            ]);
             return $attachments;
         }
 
