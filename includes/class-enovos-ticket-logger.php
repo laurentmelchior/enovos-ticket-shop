@@ -10,6 +10,12 @@ final class Logger {
     private const MAX_LINES = 800;
 
     public static function log(string $stage, string $message, array $context = []): void {
+        $settings = get_option('enovos_ticket_shop_settings', []);
+        // Missing key = enabled (default). Explicit 0/false disables writing.
+        if (is_array($settings) && array_key_exists('enable_debug_logging', $settings) && empty($settings['enable_debug_logging'])) {
+            return;
+        }
+
         $line = sprintf(
             '[%s] [%s] %s%s',
             current_time('mysql'),
