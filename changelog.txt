@@ -1,5 +1,10 @@
 Enovos Concert Ticket Shop Importer – Changelog
 
+Version 0.3.7 – 2026-08-12
+- Added bundled FPDI/FPDF (`setasign/fpdi` + `setasign/fpdf`) as a pure-PHP PDF engine so two-ticket packages can be built without Poppler on the server.
+- Engine preference is now Poppler → FPDI/FPDF → Imagick, with automatic fallback if an engine fails (e.g. unsupported PDF features in free FPDI).
+- Dashboard / README updated for the new FPDI engine status.
+
 Version 0.3.6 – 2026-08-12
 - Redesigned Settings page with card sections, provider-only credential fields, and toggle switches.
 - Redesigned Changelog page as version cards instead of a raw textarea.

@@ -1,0 +1,14 @@
+{
+  "name": "enovos/ticket-shop",
+  "description": "Enovos Concert Ticket Shop Importer",
+  "type": "wordpress-plugin",
+  "require": {
+    "php": ">=8.0",
+    "setasign/fpdf": "^1.8",
+    "setasign/fpdi": "^2.6"
+  },
+  "config": {
+    "optimize-autoloader": true,
+    "sort-packages": true
+  }
+}
