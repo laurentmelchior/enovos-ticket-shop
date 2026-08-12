@@ -32,6 +32,14 @@ require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-attach-me.ph
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-ai.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-importer.php';
 
+require_once ENOVOS_TICKET_SHOP_DIR . 'plugin-update-checker/plugin-update-checker.php';
+
+\YahnisElsts\PluginUpdateChecker\v5\PucFactory::buildUpdateChecker(
+    'https://wp-plugins.enovos-data.info/enovos-ticket-shop/update.json',
+    __FILE__,
+    'enovos-ticket-shop'
+);
+
 add_action('plugins_loaded', static function () {
     if (!class_exists('WooCommerce')) {
         return;

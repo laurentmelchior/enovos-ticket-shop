@@ -494,7 +494,7 @@ final class Plugin {
         if (!current_user_can('manage_woocommerce')) {
             return;
         }
-        $path = ENOVOS_TICKET_SHOP_DIR . 'changelog.txt';
+        $path = ENOVOS_TICKET_SHOP_DIR . 'CHANGELOG.md';
         $contents = is_readable($path) ? (string) file_get_contents($path) : '';
         $entries = $this->parse_changelog($contents);
 
@@ -542,16 +542,16 @@ final class Plugin {
         $current = null;
         foreach (preg_split("/\R/", $contents) ?: [] as $line) {
             $line = trim($line);
-            if ($line === '' || stripos($line, 'Enovos Concert Ticket Shop') === 0) {
+            if ($line === '' || preg_match('/^#\s+/', $line)) {
                 continue;
             }
-            if (preg_match('/^Version\s+([0-9.]+)\s*[–—-]\s*(.+)$/u', $line, $m)) {
+            if (preg_match('/^##\s+Version\s+([0-9.]+)(?:\s*[–—-]\s*(.+))?$/u', $line, $m)) {
                 if ($current) {
                     $entries[] = $current;
                 }
                 $current = [
                     'version' => $m[1],
-                    'date' => trim($m[2]),
+                    'date' => isset($m[2]) ? trim($m[2]) : '',
                     'items' => [],
                 ];
                 continue;

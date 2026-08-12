@@ -1,0 +1,10 @@
+{
+	"name": "Enovos Concert Ticket Shop Importer",
+	"version": "<VERSION>",
+	"download_url": "https://wp-plugins.enovos-data.info/enovos-ticket-shop/enovos-ticket-shop-<VERSION>.zip",
+	"author": "Enovos EU",
+	"sections": {
+		"description": "Imports concert ticket PDFs into WooCommerce products using OpenAI, Gemini and a configurable Custom AI provider, with Atelier enrichment and ACF mapping.",
+		"changelog": "<CHANGELOG>"
+	}
+}
