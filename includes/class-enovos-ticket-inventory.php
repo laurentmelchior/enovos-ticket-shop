@@ -46,6 +46,32 @@ final class TicketInventory {
         dbDelta($sql);
     }
 
+    /**
+     * Build a filesystem-safe PDF filename that includes the concert name.
+     * Example: coldplay-luxembourg-ticket-package-001.pdf
+     */
+    public static function package_filename(string $concert_title, int $package_no, int $product_id = 0): string {
+        $slug = sanitize_title($concert_title);
+        $slug = trim((string) preg_replace('/-+/', '-', $slug), '-');
+        if ($slug === '') {
+            $slug = $product_id > 0 ? 'product-' . $product_id : 'concert';
+        }
+        if (strlen($slug) > 80) {
+            $slug = rtrim(substr($slug, 0, 80), '-');
+        }
+        $package_no = max(1, $package_no);
+        return sprintf('%s-ticket-package-%03d.pdf', $slug, $package_no);
+    }
+
+    public static function get_package(int $package_id): ?array {
+        global $wpdb;
+        if ($package_id <= 0) {
+            return null;
+        }
+        $row = $wpdb->get_row($wpdb->prepare("SELECT * FROM " . self::table() . " WHERE id = %d", $package_id), ARRAY_A);
+        return is_array($row) ? $row : null;
+    }
+
     public static function create_packages(int $product_id, array $event, string $source_pdf, string $import_id) {
         global $wpdb;
         $event_key = sanitize_text_field((string)($event['_import_key'] ?? ''));
@@ -69,6 +95,7 @@ final class TicketInventory {
             return $existing;
         }
 
+        $concert_title = sanitize_text_field((string)($event['title'] ?? ''));
         $dir = PdfPackages::create_import_dir($import_id);
         $event_dir = trailingslashit($dir) . 'product-' . $product_id;
         if (!is_dir($event_dir)) {
@@ -78,7 +105,7 @@ final class TicketInventory {
         for ($i = 0; $i < $requested; $i++) {
             $pair = [$page_numbers[$i * 2], $page_numbers[$i * 2 + 1]];
             $package_no = $i + 1;
-            $filename = sprintf('product-%d-ticket-package-%03d.pdf', $product_id, $package_no);
+            $filename = self::package_filename($concert_title, $package_no, $product_id);
             $path = trailingslashit($event_dir) . $filename;
             $generated = PdfPackages::create_two_page_pdf($source_pdf, $pair, $path);
             if (is_wp_error($generated)) {
@@ -96,7 +123,7 @@ final class TicketInventory {
                 'import_id' => $import_id,
                 'event_key' => $event_key,
                 'product_id' => $product_id,
-                'concert_title' => sanitize_text_field((string)($event['title'] ?? '')),
+                'concert_title' => $concert_title,
                 'concert_date' => !empty($event['date']) ? $event['date'] : null,
                 'package_no' => $package_no,
                 'ticket_pages' => implode(',', $pair),

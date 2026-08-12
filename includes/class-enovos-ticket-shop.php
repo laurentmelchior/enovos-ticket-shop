@@ -39,6 +39,7 @@ final class Plugin {
         add_action('admin_post_enovos_ticket_import', [$this, 'handle_import']);
         add_action('admin_post_enovos_ticket_clear_log', [$this, 'handle_clear_log']);
         add_action('admin_post_enovos_ticket_delete_packages', [$this, 'handle_delete_packages']);
+        add_action('admin_post_enovos_ticket_download_package', [$this, 'handle_download_package']);
 
         add_action('woocommerce_checkout_order_created', [$this, 'reserve_order']);
         add_action('woocommerce_order_status_pending', [$this, 'reserve_order_by_id']);
@@ -195,7 +196,7 @@ final class Plugin {
         }
 
         echo '<div class="wrap"><h1>Ticket Inventory</h1>';
-        echo '<p>Every row is one protected PDF containing exactly two physical ticket pages. Deleting a row removes the inventory record and the PDF file. RESERVED packages linked to an open order cannot be deleted.</p>';
+        echo '<p>Every row is one protected PDF containing exactly two physical ticket pages. Use Download to save the PDF with the concert name. Deleting a row removes the inventory record and the PDF file. RESERVED packages linked to an open order cannot be deleted.</p>';
         if (is_array($notice)) {
             $class = !empty($notice['errors']) ? 'notice-warning' : 'notice-success';
             echo '<div class="notice ' . esc_attr($class) . ' is-dismissible"><p>' . esc_html((string) ($notice['message'] ?? '')) . '</p>';
@@ -213,22 +214,27 @@ final class Plugin {
         echo '<input type="hidden" name="action" value="enovos_ticket_delete_packages">';
         wp_nonce_field('enovos_ticket_delete_packages');
         echo '<p><button type="submit" class="button button-secondary">Delete selected packages</button></p>';
-        echo '<table class="widefat striped"><thead><tr><th style="width:36px"><input type="checkbox" id="enovos-inventory-select-all"></th><th>ID</th><th>Concert</th><th>Date</th><th>Package</th><th>PDF pages</th><th>PDF size</th><th>Status</th><th>Product</th><th>Order</th><th>Reserved</th><th>Delivered</th><th>Delete</th></tr></thead><tbody>';
+        echo '<table class="widefat striped"><thead><tr><th style="width:36px"><input type="checkbox" id="enovos-inventory-select-all"></th><th>ID</th><th>Concert</th><th>Date</th><th>Package</th><th>PDF pages</th><th>PDF size</th><th>Status</th><th>Product</th><th>Order</th><th>Reserved</th><th>Delivered</th><th>Download</th><th>Delete</th></tr></thead><tbody>';
         if (!$rows) {
-            echo '<tr><td colspan="13"><em>No ticket packages yet.</em></td></tr>';
+            echo '<tr><td colspan="14"><em>No ticket packages yet.</em></td></tr>';
         }
         foreach ($rows as $row) {
             $package_id = (int) $row['id'];
             $product_link = $row['product_id'] ? admin_url('post.php?post=' . (int) $row['product_id'] . '&action=edit') : '';
             $order_link = $row['order_id'] ? admin_url('admin.php?page=wc-orders&action=edit&id=' . (int) $row['order_id']) : '';
             $size_label = '—';
-            if (!empty($row['pdf_path']) && is_readable($row['pdf_path'])) {
+            $can_download = !empty($row['pdf_path']) && is_readable($row['pdf_path']);
+            if ($can_download) {
                 $bytes = (int) filesize($row['pdf_path']);
                 $size_label = $bytes >= 1048576
                     ? number_format_i18n($bytes / 1048576, 1) . ' MB'
                     : number_format_i18n($bytes / 1024, 0) . ' KB';
             }
             $can_delete = !($row['status'] === TicketInventory::STATUS_RESERVED && (int) $row['order_id'] > 0);
+            $download_url = wp_nonce_url(
+                admin_url('admin-post.php?action=enovos_ticket_download_package&package_id=' . $package_id),
+                'enovos_ticket_download_package_' . $package_id
+            );
             $single_url = wp_nonce_url(
                 admin_url('admin-post.php?action=enovos_ticket_delete_packages&package_ids[]=' . $package_id),
                 'enovos_ticket_delete_packages'
@@ -250,6 +256,13 @@ final class Plugin {
             echo '<td>' . ($order_link ? '<a href="' . esc_url($order_link) . '">#' . esc_html((string) $row['order_id']) . '</a>' : '—') . '</td>';
             echo '<td>' . esc_html($row['reserved_at'] ?: '—') . '</td>';
             echo '<td>' . esc_html($row['delivered_at'] ?: '—') . '</td>';
+            echo '<td>';
+            if ($can_download) {
+                echo '<a class="button button-small button-primary" href="' . esc_url($download_url) . '">Download</a>';
+            } else {
+                echo '<span class="description">Missing</span>';
+            }
+            echo '</td>';
             echo '<td>';
             if ($can_delete) {
                 echo '<a class="button button-small" href="' . esc_url($single_url) . '" onclick="return confirm(\'Delete package #' . esc_js((string) $package_id) . ' and its PDF?\');">Delete</a>';
@@ -288,6 +301,34 @@ final class Plugin {
             'errors' => $result['errors'],
         ], 60);
         wp_safe_redirect(admin_url('admin.php?page=enovos-ticket-inventory'));
+        exit;
+    }
+
+    public function handle_download_package(): void {
+        if (!current_user_can('manage_woocommerce')) {
+            wp_die('Unauthorized');
+        }
+        $package_id = isset($_GET['package_id']) ? (int) $_GET['package_id'] : 0;
+        check_admin_referer('enovos_ticket_download_package_' . $package_id);
+        $row = TicketInventory::get_package($package_id);
+        if (!$row) {
+            wp_die('Ticket package not found.');
+        }
+        $path = (string) ($row['pdf_path'] ?? '');
+        if ($path === '' || !is_readable($path)) {
+            wp_die('Ticket PDF file is missing or unreadable.');
+        }
+        $download_name = TicketInventory::package_filename(
+            (string) ($row['concert_title'] ?? ''),
+            (int) ($row['package_no'] ?? 1),
+            (int) ($row['product_id'] ?? 0)
+        );
+        nocache_headers();
+        header('Content-Type: application/pdf');
+        header('Content-Disposition: attachment; filename="' . $download_name . '"');
+        header('Content-Length: ' . (string) filesize($path));
+        header('X-Content-Type-Options: nosniff');
+        readfile($path);
         exit;
     }
 
