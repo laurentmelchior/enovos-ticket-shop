@@ -153,11 +153,8 @@ final class AttachMe {
             return new \WP_Error('upload_dir', (string) $uploads['error']);
         }
 
-        $filename = sprintf(
-            'enovos-ticket-package-%d-%s.pdf',
-            $package_no,
-            wp_generate_password(8, false, false)
-        );
+        $base = TicketInventory::package_filename($title, $package_no);
+        $filename = preg_replace('/\.pdf$/i', '', $base) . '-' . wp_generate_password(6, false, false) . '.pdf';
         $dest = trailingslashit($uploads['path']) . $filename;
         if (!@copy($pdf_path, $dest)) {
             return new \WP_Error('copy_failed', 'Could not copy ticket PDF into the media uploads directory.');
@@ -165,7 +162,7 @@ final class AttachMe {
 
         $attachment = [
             'post_mime_type' => 'application/pdf',
-            'post_title' => sanitize_text_field($title . ' package ' . $package_no),
+            'post_title' => sanitize_text_field(sprintf('%s – Ticket package %d', $title ?: 'Concert tickets', $package_no)),
             'post_content' => '',
             'post_status' => 'inherit',
         ];
