@@ -7,7 +7,7 @@ WordPress / WooCommerce plugin for importing concert ticket PDFs into products a
 - WordPress 6.4 or newer
 - PHP 8.0 or newer
 - WooCommerce
-- Poppler (`pdfseparate` + `pdfunite`) is preferred for lossless page extraction; PHP Imagick with PDF read/write support is supported as a fallback
+- PDF engines (first available wins, with automatic fallback): Poppler (`pdfseparate` + `pdfunite`), bundled FPDI/FPDF (pure PHP, no server binaries), then PHP Imagick with PDF support
 - A WooCommerce tax class named exactly `VAT 3%`
 - ACF is optional; when installed, `date_of_concert` and `more_about_concert` are updated through ACF
 
@@ -58,7 +58,9 @@ The **Ticket Inventory** admin page shows package, source pages, PDF size, produ
 
 Package PDFs are stored as `{concert-slug}-ticket-package-{nnn}.pdf` under the protected import directory.
 
-Poppler (`pdfseparate` + `pdfunite`) is preferred so package PDFs stay small. The Imagick fallback uses 150 DPI JPEG compression and should only be used when Poppler is unavailable.
+Poppler is preferred when installed. On hosts without Poppler (typical managed WordPress), the bundled **FPDI/FPDF** libraries import original pages in pure PHP and keep packages small. Imagick (150 DPI JPEG) is the last-resort fallback and produces larger files.
+
+Dependencies are shipped under `vendor/` (`setasign/fpdf`, `setasign/fpdi`). After cloning without `vendor/`, run `composer install --no-dev`.
 
 ## WooCommerce delivery
 

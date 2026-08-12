@@ -31,12 +31,18 @@ final class PdfPackages {
     }
 
     public static function engine_status(): array {
-        $poppler = self::poppler_commands();
-        if ($poppler) {
+        if (self::poppler_commands()) {
             return [
                 'available' => true,
                 'engine' => 'poppler',
                 'message' => 'Poppler PDF engine is available. Original PDF pages will be preserved without rasterizing (small files).',
+            ];
+        }
+        if (self::fpdi_available()) {
+            return [
+                'available' => true,
+                'engine' => 'fpdi',
+                'message' => 'FPDI/FPDF PHP engine is available. Original PDF pages are imported without rasterizing (no Poppler required).',
             ];
         }
         if (class_exists('Imagick')) {
@@ -46,7 +52,7 @@ final class PdfPackages {
                     return [
                         'available' => true,
                         'engine' => 'imagick',
-                        'message' => 'Imagick fallback at ' . self::IMAGICK_DPI . ' DPI (install Poppler for smaller lossless packages).',
+                        'message' => 'Imagick fallback at ' . self::IMAGICK_DPI . ' DPI (FPDI/FPDF or Poppler keep original pages and smaller files).',
                     ];
                 }
             } catch (\Throwable $e) {
@@ -60,7 +66,7 @@ final class PdfPackages {
         return [
             'available' => false,
             'engine' => 'none',
-            'message' => 'No supported PDF engine is available. Install Poppler (pdfseparate + pdfunite) or enable PHP Imagick with PDF support.',
+            'message' => 'No supported PDF engine is available. Bundle vendor/setasign (FPDI/FPDF), install Poppler (pdfseparate + pdfunite), or enable PHP Imagick with PDF support.',
         ];
     }
 
@@ -73,35 +79,88 @@ final class PdfPackages {
             return new \WP_Error('source_pdf_missing', 'The source ticket PDF is not readable.');
         }
 
-        $status = self::engine_status();
-        if (empty($status['available'])) {
+        $attempts = [];
+        if (self::poppler_commands()) {
+            $attempts[] = 'poppler';
+        }
+        if (self::fpdi_available()) {
+            $attempts[] = 'fpdi';
+        }
+        if (self::imagick_available()) {
+            $attempts[] = 'imagick';
+        }
+        if (!$attempts) {
+            $status = self::engine_status();
             return new \WP_Error('pdf_engine_unavailable', $status['message']);
         }
 
-        $result = $status['engine'] === 'poppler'
-            ? self::create_with_poppler($source_pdf, $pages, $destination)
-            : self::create_with_imagick($source_pdf, $pages, $destination);
-
-        if (!is_wp_error($result) && is_readable($destination)) {
-            $size = (int) filesize($destination);
-            Logger::log('STEP', 'Ticket package PDF written', [
-                'engine' => $status['engine'],
-                'path' => basename($destination),
-                'bytes' => $size,
-                'kb' => round($size / 1024, 1),
-            ]);
-            if ($size > self::WARN_SIZE_BYTES) {
-                Logger::log('FAIL', 'Ticket package PDF is larger than 2 MB', [
-                    'engine' => $status['engine'],
+        $last_error = null;
+        foreach ($attempts as $engine) {
+            $result = match ($engine) {
+                'poppler' => self::create_with_poppler($source_pdf, $pages, $destination),
+                'fpdi' => self::create_with_fpdi($source_pdf, $pages, $destination),
+                default => self::create_with_imagick($source_pdf, $pages, $destination),
+            };
+            if (!is_wp_error($result) && is_readable($destination)) {
+                $size = (int) filesize($destination);
+                Logger::log('STEP', 'Ticket package PDF written', [
+                    'engine' => $engine,
+                    'path' => basename($destination),
                     'bytes' => $size,
-                    'hint' => $status['engine'] === 'imagick'
-                        ? 'Install Poppler (pdfseparate + pdfunite) to keep original page size.'
-                        : 'Source ticket pages may already be large images.',
+                    'kb' => round($size / 1024, 1),
                 ]);
+                if ($size > self::WARN_SIZE_BYTES) {
+                    Logger::log('FAIL', 'Ticket package PDF is larger than 2 MB', [
+                        'engine' => $engine,
+                        'bytes' => $size,
+                        'hint' => $engine === 'imagick'
+                            ? 'Use FPDI/FPDF or Poppler to keep original page size.'
+                            : 'Source ticket pages may already be large images.',
+                    ]);
+                }
+                return $result;
+            }
+            $last_error = is_wp_error($result) ? $result : new \WP_Error('pdf_package_write_failed', 'The two-ticket PDF package could not be written with engine ' . $engine . '.');
+            Logger::log('STEP', 'PDF engine attempt failed, trying next', [
+                'engine' => $engine,
+                'error' => $last_error->get_error_message(),
+            ]);
+            if (is_file($destination)) {
+                @unlink($destination);
             }
         }
 
-        return $result;
+        return $last_error ?: new \WP_Error('pdf_engine_unavailable', 'No PDF engine could create the ticket package.');
+    }
+
+    private static function create_with_fpdi(string $source_pdf, array $pages, string $destination) {
+        if (!self::fpdi_available()) {
+            return new \WP_Error('fpdi_unavailable', 'FPDI/FPDF is not available.');
+        }
+        try {
+            $pdf = new \setasign\Fpdi\Fpdi('P', 'mm');
+            $page_count = $pdf->setSourceFile($source_pdf);
+            foreach ($pages as $page) {
+                if ($page > $page_count) {
+                    return new \WP_Error('pdf_page_out_of_range', 'Requested page ' . $page . ' but source PDF has only ' . $page_count . ' page(s).');
+                }
+                $tpl_id = $pdf->importPage($page);
+                $size = $pdf->getTemplateSize($tpl_id);
+                if (!$size || empty($size['width']) || empty($size['height'])) {
+                    return new \WP_Error('pdf_page_size_failed', 'Could not determine size for PDF page ' . $page . '.');
+                }
+                $pdf->AddPage($size['orientation'], [$size['width'], $size['height']]);
+                $pdf->useTemplate($tpl_id, 0, 0, $size['width'], $size['height'], true);
+            }
+            $pdf->Output('F', $destination);
+            if (!is_file($destination) || filesize($destination) < 1000) {
+                return new \WP_Error('pdf_package_write_failed', 'The two-ticket PDF package could not be written with FPDI.');
+            }
+            @chmod($destination, 0640);
+            return $destination;
+        } catch (\Throwable $e) {
+            return new \WP_Error('fpdi_exception', 'FPDI ticket PDF generation failed: ' . $e->getMessage());
+        }
     }
 
     private static function create_with_poppler(string $source_pdf, array $pages, string $destination) {
@@ -185,6 +244,28 @@ final class PdfPackages {
             return $destination;
         } catch (\Throwable $e) {
             return new \WP_Error('pdf_package_exception', 'Ticket PDF generation failed: ' . $e->getMessage());
+        }
+    }
+
+    private static function fpdi_available(): bool {
+        if (class_exists(\setasign\Fpdi\Fpdi::class)) {
+            return true;
+        }
+        $autoload = ENOVOS_TICKET_SHOP_DIR . 'vendor/autoload.php';
+        if (is_readable($autoload)) {
+            require_once $autoload;
+        }
+        return class_exists(\setasign\Fpdi\Fpdi::class);
+    }
+
+    private static function imagick_available(): bool {
+        if (!class_exists('Imagick')) {
+            return false;
+        }
+        try {
+            return (bool) \Imagick::queryFormats('PDF');
+        } catch (\Throwable $e) {
+            return false;
         }
     }
 
