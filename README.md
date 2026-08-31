@@ -15,9 +15,9 @@ WordPress / WooCommerce plugin for importing concert ticket PDFs into products a
 
 - One PDF page is one physical ticket.
 - Two physical tickets form one WooCommerce stock unit and one protected PDF package.
-- Ticket pages are grouped deterministically from the PDF text before AI enrichment. The importer reconciles AI results with these page groups and reports page coverage, missing enrichment, and blocked prices in the import check.
+- Ticket pages are grouped deterministically from the PDF text before AI enrichment. The importer reconciles AI results with these page groups and reports page coverage, missing enrichment, and prices requiring review in the import check.
 - Event advertisements printed in ticket footers are ignored and cannot become products.
-- The product price is the verified public price of one ticket, rounded upward to the next full EUR amount.
+- The product price is the reviewed public price of one ticket, rounded upward to the next full EUR amount.
 - The ticket PDF price is never used.
 - Products are Simple Products, stock managed, Sold individually, and assigned to product category `den-atelier`.
 - Products use the `VAT 3%` tax class.
@@ -32,7 +32,15 @@ Choose exactly one provider in **Enovos Tickets > Settings**:
 
 Only the selected provider is called. Custom AI supports Bearer authentication, a configurable API-key header, or no authentication.
 
-If AI enrichment or public-price verification fails, every deterministically detected concert remains visible in the import check as **Blocked** with a reason. Analysis failures also return to the dashboard and write a summary containing the PDF page count, detected groups, ready events, blocked events, and unassigned pages.
+If the official Atelier price cannot be verified, the selected AI provider performs a broader exact-event web search across credible organizers, primary ticket sellers, venues, and event listings. A result is displayed as **Suggested – review**, never as verified.
+
+Every structurally valid concert remains available in the import check. Its ticket price is editable, accepts a decimal point or comma, and must be reviewed before import:
+
+- **Verified** – found through the official verification flow
+- **Suggested – review** – found through the broader web search
+- **Manual price required** – no credible online price was found
+
+An administrator can enter or replace the price manually. A positive reviewed price is required to create a product, but a missing online price does not block the concert. Suggested and manual prices are marked in product metadata. All accepted prices are rounded upward to the next full EUR amount.
 
 ## Settings toggles
 

@@ -12,7 +12,8 @@ final class Importer {
 
         foreach ($events as $event) {
             Logger::log('START', 'Processing event', ['title' => $event['title'] ?? '']);
-            if (empty($event['price_verified']) || (float)($event['price_per_ticket'] ?? 0) <= 0) {
+            $price_accepted = !empty($event['price_verified']) || !empty($event['price_approved']);
+            if (!$price_accepted || (float)($event['price_per_ticket'] ?? 0) <= 0) {
                 $event = AI::enrich_atelier($event, $settings);
                 Logger::log('STEP', 'Atelier data received', ['title' => $event['title'] ?? '', 'price' => $event['price_per_ticket'] ?? 0]);
                 $price_verification = AI::verify_atelier_price($event, $settings);
@@ -26,10 +27,14 @@ final class Importer {
                 }
                 $event = array_merge($event, $price_verification);
             } else {
-                Logger::log('STEP', 'Using price already verified during analysis', ['title' => $event['title'] ?? '', 'price' => $event['price_per_ticket'] ?? 0]);
+                Logger::log('STEP', 'Using reviewed ticket price from import check', [
+                    'title' => $event['title'] ?? '',
+                    'price' => $event['price_per_ticket'] ?? 0,
+                    'method' => $event['price_verification_method'] ?? '',
+                ]);
             }
             $event['price_per_ticket'] = AI::round_price_up((float) ($event['price_per_ticket'] ?? 0));
-            Logger::log('OK', 'Verified ticket price applied to event after upward rounding', [
+            Logger::log('OK', 'Reviewed ticket price applied to event after upward rounding', [
                 'title' => $event['title'] ?? '',
                 'price_per_ticket' => $event['price_per_ticket'],
                 'verified_price_before_rounding' => $event['verified_price_before_rounding'] ?? null,
@@ -67,11 +72,12 @@ final class Importer {
         if ($event['product_quantity'] <= 0) {
             return new \WP_Error('invalid_product_quantity', 'Product quantity must be greater than zero.');
         }
-        if (empty($event['price_per_ticket']) || $event['price_per_ticket'] <= 0 || empty($event['price_verified'])) {
-            return new \WP_Error('invalid_price', 'The current Atelier ticket price was not verified. No product was created.');
-        }
-        if (empty($event['atelier_url'])) {
-            return new \WP_Error('missing_atelier_url', 'No Atelier URL was found.');
+        if (
+            empty($event['price_per_ticket'])
+            || $event['price_per_ticket'] <= 0
+            || (empty($event['price_verified']) && empty($event['price_approved']))
+        ) {
+            return new \WP_Error('invalid_price', 'A positive reviewed ticket price is required. No product was created.');
         }
 
         Logger::log('STEP', 'Checking for an existing product');
@@ -87,8 +93,9 @@ final class Importer {
                 $existing_product->set_sold_individually(true);
                 $existing_product->save();
                 update_post_meta($existing, '_enovos_price_repaired_at', current_time('mysql'));
-                update_post_meta($existing, '_enovos_price_verified', 1);
-                update_post_meta($existing, '_enovos_price_source', esc_url_raw($event['price_source'] ?? ''));
+                update_post_meta($existing, '_enovos_price_verified', !empty($event['price_verified']) ? 1 : 0);
+                update_post_meta($existing, '_enovos_price_approved', !empty($event['price_approved']) ? 1 : 0);
+                update_post_meta($existing, '_enovos_price_source', sanitize_text_field($event['price_source'] ?? ''));
                 update_post_meta($existing, '_enovos_price_verification_method', sanitize_text_field($event['price_verification_method'] ?? ''));
                 update_post_meta($existing, '_enovos_product_quantity', (int) $event['product_quantity']);
                 update_post_meta($existing, '_enovos_product_quantity_source', 'manual_override');
@@ -142,8 +149,9 @@ final class Importer {
         update_post_meta($product_id, '_enovos_ticket_quantity_per_product', 2);
         update_post_meta($product_id, '_enovos_product_quantity', (int) $event['product_quantity']);
         update_post_meta($product_id, '_enovos_product_quantity_source', isset($event['product_quantity']) && (int) $event['product_quantity'] !== (int) $derived_stock ? 'manual_override' : 'derived_from_ticket_count');
-        update_post_meta($product_id, '_enovos_price_verified', 1);
-        update_post_meta($product_id, '_enovos_price_source', esc_url_raw($event['price_source'] ?? ''));
+        update_post_meta($product_id, '_enovos_price_verified', !empty($event['price_verified']) ? 1 : 0);
+        update_post_meta($product_id, '_enovos_price_approved', !empty($event['price_approved']) ? 1 : 0);
+        update_post_meta($product_id, '_enovos_price_source', sanitize_text_field($event['price_source'] ?? ''));
         update_post_meta($product_id, '_enovos_price_verification_method', sanitize_text_field($event['price_verification_method'] ?? ''));
         update_post_meta($product_id, '_enovos_ai_providers', wp_json_encode($event['_ai_providers'] ?? []));
         update_post_meta($product_id, '_enovos_ai_confidence', (float)($event['_ai_confidence'] ?? 0));
@@ -257,7 +265,7 @@ final class Importer {
         $link_type = is_array($link_object) ? (string) ($link_object['type'] ?? '') : '';
 
         // ACF Link fields require an array; URL/Text fields expect a plain URL string.
-        if ($link_type === 'link') {
+        if ($link_type === 'link' && $atelier_url !== '') {
             $link_value = [
                 'url' => $atelier_url,
                 'title' => 'More about this concert',

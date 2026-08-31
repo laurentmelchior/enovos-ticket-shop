@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 0.3.9 – 2026-08-31
+- Added a broader exact-event web search for price suggestions when the official Atelier price cannot be verified.
+- Made ticket prices editable in the import check, with support for decimal points and commas.
+- Missing prices no longer block structurally valid concerts; administrators can enter and approve a positive price manually.
+- Added distinct Verified, Suggested – review, and Manual price required states.
+- Manual and approved suggested prices retain their source method in WooCommerce product metadata.
+- Updated the plugin author to Enovos Digital Marketing / Bromance INC.
+
 ## Version 0.3.8 – 2026-08-31
 - Added deterministic PDF text analysis to identify the real page count and group ticket pages by concert before AI enrichment.
 - Reconciled AI results with authoritative ticket groups so missing events remain visible and footer advertisements cannot create phantom events.
