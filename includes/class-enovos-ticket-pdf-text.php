@@ -29,7 +29,9 @@ final class PdfText {
             'pages' => $pages,
             'groups' => $groups,
             'assigned_pages' => $assigned,
-            'unassigned_pages' => array_values(array_diff(range(1, $page_count), $assigned)),
+            'unassigned_pages' => $page_count > 0
+                ? array_values(array_diff(range(1, $page_count), $assigned))
+                : [],
         ];
     }
 
@@ -180,6 +182,16 @@ final class PdfText {
     }
 
     private static function page_record(int $page, string $text): array {
+        if (!preg_match('//u', $text)) {
+            if (function_exists('mb_convert_encoding')) {
+                $text = mb_convert_encoding($text, 'UTF-8', 'Windows-1252');
+            } elseif (function_exists('iconv')) {
+                $converted = iconv('Windows-1252', 'UTF-8//IGNORE', $text);
+                if (is_string($converted)) {
+                    $text = $converted;
+                }
+            }
+        }
         $text = preg_replace('/\s+/u', ' ', trim($text)) ?: trim($text);
         $date = self::extract_date($text);
         $title = self::extract_title($text);
@@ -217,7 +229,7 @@ final class PdfText {
     }
 
     private static function extract_date(string $text): string {
-        if (!preg_match('/\b(\d{2})\/(\d{2})\/(\d{2}|\d{4})\b/', $text, $match)) {
+        if (!preg_match('/(?<!\d)(\d{2})\/(\d{2})\/(\d{2}|\d{4})(?!\d)/', $text, $match)) {
             return '';
         }
         $year = (int) $match[3];

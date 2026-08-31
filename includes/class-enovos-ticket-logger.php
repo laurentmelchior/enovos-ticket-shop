@@ -60,8 +60,17 @@ final class Logger {
         if ($file === '' || !is_readable($file)) {
             return [];
         }
-        $file_lines = @file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
-        return is_array($file_lines) ? array_slice($file_lines, -$limit) : [];
+        $size = (int) @filesize($file);
+        $offset = max(0, $size - (1024 * 1024));
+        $contents = @file_get_contents($file, false, null, $offset);
+        if (!is_string($contents) || $contents === '') {
+            return [];
+        }
+        $file_lines = preg_split('/\R/', $contents, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        if ($offset > 0) {
+            array_shift($file_lines);
+        }
+        return array_slice($file_lines, -$limit);
     }
 
     public static function path(): string {

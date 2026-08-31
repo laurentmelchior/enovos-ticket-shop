@@ -431,7 +431,6 @@ TXT;
             Logger::log('FAIL', 'Gemini HTTP/API error', [
                 'status' => $code,
                 'model' => $model,
-                'body' => self::safe_excerpt($raw_body),
             ]);
             return new \WP_Error('gemini_response', 'Gemini API error.', ['status' => $code, 'body' => $data]);
         }
@@ -578,7 +577,6 @@ TXT;
             Logger::log('FAIL', 'Gemini Atelier HTTP/API error', [
                 'status' => $code,
                 'model' => trim($settings['gemini_model'] ?: 'gemini-3.6-flash'),
-                'body' => self::safe_excerpt($raw_body),
             ]);
             return new \WP_Error('gemini_enrichment_response', 'Gemini Atelier API error.', ['status' => $code, 'body' => $data]);
         }
