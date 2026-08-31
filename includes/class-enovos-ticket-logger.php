@@ -53,10 +53,15 @@ final class Logger {
 
     public static function lines(int $limit = 250): array {
         $lines = get_option(self::OPTION, []);
-        if (!is_array($lines)) {
+        if (is_array($lines) && $lines) {
+            return array_slice($lines, -$limit);
+        }
+        $file = self::path();
+        if ($file === '' || !is_readable($file)) {
             return [];
         }
-        return array_slice($lines, -$limit);
+        $file_lines = @file($file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES);
+        return is_array($file_lines) ? array_slice($file_lines, -$limit) : [];
     }
 
     public static function path(): string {
