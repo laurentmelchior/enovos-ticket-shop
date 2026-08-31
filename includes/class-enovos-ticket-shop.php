@@ -828,26 +828,11 @@ final class Plugin {
             $possible = intdiv(count($pages), 2);
             $qty = isset($posted_quantities[$key]) ? max(1, (int)$posted_quantities[$key]) : $possible;
             if ($possible <= 0 || $qty > $possible) wp_die(esc_html('Invalid product quantity for ' . ($event['title'] ?? 'concert') . '. Maximum available ticket packages: ' . $possible));
-            $price = self::parse_event_price($posted_prices[$key] ?? '');
-            if (is_wp_error($price)) {
-                wp_die(esc_html('Invalid ticket price for ' . ($event['title'] ?? 'concert') . ': ' . $price->get_error_message()));
+            $reviewed_event = self::apply_reviewed_price($event, $posted_prices[$key] ?? '');
+            if (is_wp_error($reviewed_event)) {
+                wp_die(esc_html('Invalid ticket price for ' . ($event['title'] ?? 'concert') . ': ' . $reviewed_event->get_error_message()));
             }
-            $original_price = (float) ($event['price_per_ticket'] ?? 0);
-            $price_changed = abs($original_price - $price) > 0.00001;
-            $event['verified_price_before_rounding'] = $price;
-            $event['price_per_ticket'] = AI::round_price_up($price);
-            $event['price_approved'] = 1;
-            if ($price_changed || (empty($event['price_verified']) && empty($event['price_suggested']))) {
-                $event['price_verified'] = 0;
-                $event['price_suggested'] = 0;
-                $event['price_source'] = 'manual';
-                $event['price_verification_method'] = 'manual';
-            } elseif (!empty($event['price_suggested'])) {
-                $event['price_verified'] = 0;
-                $event['price_source'] = (string) ($event['price_source'] ?? '');
-                $event['price_verification_method'] = 'suggested_approved';
-            }
-            unset($event['_price_warning']);
+            $event = $reviewed_event;
             $event['product_quantity'] = $qty;
             $selected_events[] = $event;
         }
@@ -902,6 +887,30 @@ final class Plugin {
             return new \WP_Error('invalid_manual_price', 'The ticket price must be greater than 0 and no more than 5000 EUR.');
         }
         return $price;
+    }
+
+    private static function apply_reviewed_price(array $event, $raw): array|\WP_Error {
+        $price = self::parse_event_price($raw);
+        if (is_wp_error($price)) {
+            return $price;
+        }
+        $original_price = (float) ($event['price_per_ticket'] ?? 0);
+        $price_changed = abs($original_price - $price) > 0.00001;
+        $event['verified_price_before_rounding'] = $price;
+        $event['price_per_ticket'] = AI::round_price_up($price);
+        $event['price_approved'] = 1;
+        if ($price_changed || (empty($event['price_verified']) && empty($event['price_suggested']))) {
+            $event['price_verified'] = 0;
+            $event['price_suggested'] = 0;
+            $event['price_source'] = 'manual';
+            $event['price_verification_method'] = 'manual';
+        } elseif (!empty($event['price_suggested'])) {
+            $event['price_verified'] = 0;
+            $event['price_source'] = (string) ($event['price_source'] ?? '');
+            $event['price_verification_method'] = 'suggested_approved';
+        }
+        unset($event['_price_warning']);
+        return $event;
     }
 
     private function event_import_key(array $event): string {
