@@ -4,6 +4,10 @@
   max-width: 1100px;
 }
 
+.enovos-admin--wide {
+  max-width: none;
+}
+
 .enovos-admin h1 {
   margin-bottom: 8px;
 }
@@ -210,11 +214,16 @@
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
   line-height: 1.5;
-  background: #1d2327;
-  color: #f0f0f1;
-  border: 1px solid #1d2327;
+  background: #fff;
+  color: #000;
+  border: 1px solid #dcdcde;
   border-radius: 8px;
   padding: 12px 14px;
+}
+
+.enovos-event-price {
+  width: 110px;
+  text-align: right;
 }
 
 .enovos-panel {
