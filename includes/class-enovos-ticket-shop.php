@@ -173,12 +173,20 @@ final class Plugin {
         }
         $analysis = get_transient('enovos_ticket_shop_last_analysis_' . get_current_user_id());
         $last_import = get_transient('enovos_ticket_shop_last_import_' . get_current_user_id());
+        $analysis_notice = get_transient('enovos_ticket_shop_analysis_notice_' . get_current_user_id());
+        if ($analysis_notice) {
+            delete_transient('enovos_ticket_shop_analysis_notice_' . get_current_user_id());
+        }
         $settings = self::settings();
         $engine = PdfPackages::engine_status();
         $attach_me_on = AttachMe::is_active() && !empty($settings['enable_attach_me']);
 
         echo '<div class="wrap enovos-admin"><h1>Enovos Concert Ticket Shop</h1>';
         echo '<p class="enovos-admin-lead">Import concert ticket PDFs, create protected two-ticket packages, and deliver them with WooCommerce orders.</p>';
+        if (is_array($analysis_notice)) {
+            $notice_class = !empty($analysis_notice['success']) ? 'notice-success' : 'notice-warning';
+            echo '<div class="notice ' . esc_attr($notice_class) . ' inline"><p>' . esc_html((string) ($analysis_notice['message'] ?? '')) . '</p></div>';
+        }
 
         echo '<div class="enovos-status-grid">';
         echo '<div class="enovos-status-card"><span class="label">Version</span><span class="value">' . esc_html(ENOVOS_TICKET_SHOP_VERSION) . '</span></div>';
@@ -214,6 +222,29 @@ final class Plugin {
         $auto_select = !empty($settings['auto_select_ready_events']);
         echo '<div class="enovos-panel"><h2>Import check</h2>';
         echo '<p>Review every concert before import. You can reduce the product quantity manually, but it cannot exceed the number of complete two-ticket packages detected in the PDF.</p>';
+        $pdf_analysis = is_array($analysis['pdf_analysis'] ?? null) ? $analysis['pdf_analysis'] : [];
+        $page_count = (int) ($pdf_analysis['page_count'] ?? 0);
+        $assigned_count = count((array) ($pdf_analysis['assigned_pages'] ?? []));
+        if ($page_count > 0) {
+            echo '<p><strong>Page coverage:</strong> ' . esc_html(sprintf(
+                '%d of %d ticket pages assigned to %d concerts.',
+                $assigned_count,
+                $page_count,
+                count($analysis['consensus'])
+            )) . '</p>';
+        }
+        if (!empty($pdf_analysis['unassigned_pages'])) {
+            echo '<div class="notice notice-warning inline"><p><strong>Unassigned ticket pages:</strong> '
+                . esc_html(implode(', ', array_map('intval', $pdf_analysis['unassigned_pages']))) . '</p></div>';
+        }
+        if (!empty($analysis['price_errors'])) {
+            echo '<div class="notice notice-warning inline"><p><strong>Some concerts are blocked:</strong></p><ul>';
+            foreach ($analysis['price_errors'] as $price_error) {
+                echo '<li>' . esc_html((string) ($price_error['title'] ?? 'Concert')) . ': '
+                    . esc_html((string) ($price_error['error'] ?? 'Ticket price could not be verified.')) . '</li>';
+            }
+            echo '</ul></div>';
+        }
         if (empty($engine['available'])) {
             echo '<div class="notice notice-error inline"><p><strong>Ticket PDF generation is blocked:</strong> ' . esc_html($engine['message']) . '</p></div>';
         }
@@ -221,12 +252,23 @@ final class Plugin {
         echo '<input type="hidden" name="action" value="enovos_ticket_import">';
         wp_nonce_field('enovos_ticket_import');
         echo '<p><label><input type="checkbox" id="enovos-select-all" ' . checked($auto_select, true, false) . '> <strong>Select / deselect all</strong></label></p>';
-        echo '<table class="widefat striped"><thead><tr><th>Select</th><th>Concert</th><th>Date</th><th>Detected pages</th><th>Packages available</th><th>Product quantity</th><th>Price</th><th>Atelier</th><th>Image</th><th>Status</th></tr></thead><tbody>';
+        echo '<table class="widefat striped"><thead><tr><th>Select</th><th>Concert</th><th>Date</th><th>Detected pages</th><th>Packages available</th><th>Product quantity</th><th>Price</th><th>Atelier</th><th>Image</th><th>Status</th><th>Reason</th></tr></thead><tbody>';
         foreach ($analysis['consensus'] as $event) {
             $key = $event['_import_key'] ?? $this->event_import_key($event);
             $pages = array_values(array_filter(array_map('intval', (array) ($event['page_numbers'] ?? []))));
             $possible = intdiv(count($pages), 2);
             $valid = !empty($engine['available']) && !empty($event['title']) && !empty($event['date']) && !empty($event['atelier_url']) && !empty($event['price_verified']) && (float) ($event['price_per_ticket'] ?? 0) > 0 && $possible > 0;
+            $blocked_reason = (string) ($event['_blocked_reason'] ?? '');
+            if (!$valid && $blocked_reason === '') {
+                $missing = [];
+                if (empty($engine['available'])) $missing[] = 'PDF engine unavailable';
+                if (empty($event['title'])) $missing[] = 'title missing';
+                if (empty($event['date'])) $missing[] = 'date missing';
+                if (empty($event['atelier_url'])) $missing[] = 'Atelier URL missing';
+                if (empty($event['price_verified']) || (float) ($event['price_per_ticket'] ?? 0) <= 0) $missing[] = 'price not verified';
+                if ($possible <= 0) $missing[] = 'fewer than two ticket pages';
+                $blocked_reason = implode(', ', $missing);
+            }
             echo '<tr>';
             echo '<td><input type="checkbox" class="enovos-import-check" name="selected_events[]" value="' . esc_attr($key) . '" ' . checked($valid && $auto_select, true, false) . ' ' . disabled($valid, false, false) . '></td>';
             echo '<td><strong>' . esc_html($event['title'] ?? '') . '</strong></td>';
@@ -238,6 +280,7 @@ final class Plugin {
             echo '<td>' . (!empty($event['atelier_url']) ? '<a target="_blank" rel="noopener" href="' . esc_url($event['atelier_url']) . '">Open</a>' : 'Missing') . '</td>';
             echo '<td>' . (!empty($event['image_url']) ? '<span style="color:green">Found</span>' : '<span style="color:#996800">Missing</span>') . '</td>';
             echo '<td>' . ($valid ? '<span style="color:green;font-weight:600">Ready</span>' : '<span style="color:#b32d2e;font-weight:600">Blocked</span>') . '</td>';
+            echo '<td>' . ($valid ? '—' : esc_html($blocked_reason)) . '</td>';
             echo '</tr>';
         }
         echo '</tbody></table><p><button class="button button-primary" type="submit">Import selected products and create ticket packages</button></p></form>';
@@ -588,18 +631,30 @@ final class Plugin {
         if (!current_user_can('manage_woocommerce')) wp_die('Unauthorized');
         check_admin_referer('enovos_ticket_analyze');
         Logger::log('START', 'PDF analysis started');
-        if (empty($_FILES['ticket_pdf']['tmp_name'])) wp_die('No PDF uploaded.');
+        if (empty($_FILES['ticket_pdf']['tmp_name'])) {
+            Logger::log('FAIL', 'PDF analysis stopped because no file was uploaded');
+            $this->redirect_analysis_notice('No PDF was uploaded.');
+        }
         $file = $_FILES['ticket_pdf'];
-        if (($file['type'] ?? '') !== 'application/pdf' && !preg_match('/\.pdf$/i', $file['name'] ?? '')) wp_die('Only PDF files are allowed.');
+        if (($file['type'] ?? '') !== 'application/pdf' && !preg_match('/\.pdf$/i', $file['name'] ?? '')) {
+            Logger::log('FAIL', 'PDF analysis rejected a non-PDF upload', ['filename' => sanitize_file_name($file['name'] ?? '')]);
+            $this->redirect_analysis_notice('Only PDF files are allowed.');
+        }
         require_once ABSPATH . 'wp-admin/includes/file.php';
         $upload = wp_handle_upload($file, ['test_form'=>false, 'mimes'=>['pdf'=>'application/pdf']]);
-        if (isset($upload['error'])) wp_die(esc_html($upload['error']));
+        if (isset($upload['error'])) {
+            Logger::log('FAIL', 'WordPress could not accept the PDF upload', ['error' => sanitize_text_field($upload['error'])]);
+            $this->redirect_analysis_notice('The PDF upload failed: ' . sanitize_text_field($upload['error']));
+        }
 
         $import_id = gmdate('YmdHis') . '-' . wp_generate_password(10, false, false);
         $dir = PdfPackages::create_import_dir($import_id);
         $source_pdf = trailingslashit($dir) . 'master.pdf';
         if (!@rename($upload['file'], $source_pdf)) {
-            if (!@copy($upload['file'], $source_pdf)) wp_die('The uploaded PDF could not be moved into protected storage.');
+            if (!@copy($upload['file'], $source_pdf)) {
+                Logger::log('FAIL', 'Uploaded PDF could not be moved into protected storage', ['import_id' => $import_id]);
+                $this->redirect_analysis_notice('The uploaded PDF could not be moved into protected storage.');
+            }
             @unlink($upload['file']);
         }
         @chmod($source_pdf, 0640);
@@ -612,9 +667,20 @@ final class Plugin {
             $result = AI::extract_from_pdf($source_pdf, $settings);
         } catch (\Throwable $e) {
             Logger::log('FAIL', 'AI analysis exception', ['error'=>$e->getMessage()]);
-            wp_die(esc_html('PDF analysis failed: ' . $e->getMessage()));
+            $result = new \WP_Error('analysis_exception', 'PDF analysis failed: ' . $e->getMessage());
         }
-        if (is_wp_error($result)) wp_die(esc_html($result->get_error_message()));
+        if (is_wp_error($result)) {
+            $message = $result->get_error_message();
+            $result = $this->blocked_analysis_from_pdf($source_pdf, $settings, $message);
+            set_transient('enovos_ticket_shop_last_analysis_' . get_current_user_id(), $result, 6 * HOUR_IN_SECONDS);
+            Logger::log('FAIL', 'PDF analysis completed with only deterministic blocked groups', [
+                'filename' => $settings['_source_filename'],
+                'pages' => (int) ($result['pdf_analysis']['page_count'] ?? 0),
+                'groups' => count($result['consensus'] ?? []),
+                'error' => $message,
+            ]);
+            $this->redirect_analysis_notice('AI analysis failed. Detected ticket groups are shown as blocked: ' . $message);
+        }
 
         $enriched = [];
         $price_errors = [];
@@ -626,9 +692,10 @@ final class Plugin {
             if (is_wp_error($verified)) {
                 $price_errors[] = ['title'=>$event['title'] ?? '', 'error'=>$verified->get_error_message()];
                 Logger::log('FAIL', 'Price verification failed during analysis', ['title'=>$event['title'] ?? '', 'error'=>$verified->get_error_message()]);
-                continue;
+                $event['_blocked_reason'] = $verified->get_error_message();
+            } else {
+                $event = array_merge($event, $verified);
             }
-            $event = array_merge($event, $verified);
             $event['_import_key'] = $this->event_import_key($event);
             $event['_source_filename'] = $settings['_source_filename'];
             $enriched[] = $event;
@@ -638,9 +705,68 @@ final class Plugin {
         $result['source_pdf_path'] = $source_pdf;
         $result['source_filename'] = $settings['_source_filename'];
         $result['import_id'] = $import_id;
-        if (!$enriched) wp_die('No concert with a verified positive ticket price was found. Check the import log.');
         set_transient('enovos_ticket_shop_last_analysis_' . get_current_user_id(), $result, 6 * HOUR_IN_SECONDS);
-        Logger::log('OK', 'Analysis completed and import check prepared', ['events'=>count($enriched), 'provider'=>$settings['ai_provider']]);
+        $ready = count(array_filter($enriched, static fn($event) => !empty($event['price_verified']) && (float) ($event['price_per_ticket'] ?? 0) > 0));
+        $provider_events = 0;
+        foreach (($result['providers'] ?? []) as $provider_result) {
+            $provider_events += count($provider_result['events'] ?? []);
+        }
+        Logger::log($ready > 0 ? 'OK' : 'FAIL', 'PDF analysis finished', [
+            'filename' => $settings['_source_filename'],
+            'pages' => (int) ($result['pdf_analysis']['page_count'] ?? 0),
+            'groups' => count($result['pdf_analysis']['groups'] ?? []),
+            'ai_events' => $provider_events,
+            'reconciled_events' => count($enriched),
+            'ready_events' => $ready,
+            'blocked_events' => count($enriched) - $ready,
+            'unassigned_pages' => $result['pdf_analysis']['unassigned_pages'] ?? [],
+        ]);
+        $message = $ready > 0
+            ? sprintf('Analysis completed: %d concert(s) ready and %d blocked.', $ready, count($enriched) - $ready)
+            : 'Analysis completed, but all detected concerts are blocked. Review the reasons below.';
+        $this->redirect_analysis_notice($message, $ready > 0);
+    }
+
+    private function blocked_analysis_from_pdf(string $source_pdf, array $settings, string $reason): array {
+        $pdf_analysis = PdfText::analyze($source_pdf);
+        unset($pdf_analysis['pages']);
+        $events = [];
+        foreach (($pdf_analysis['groups'] ?? []) as $group) {
+            $event = [
+                'title' => (string) ($group['title_guess'] ?? ''),
+                'date' => (string) ($group['date'] ?? ''),
+                'venue' => (string) ($group['venue'] ?? ''),
+                'ticket_count' => count($group['page_numbers'] ?? []),
+                'page_numbers' => array_values(array_map('intval', (array) ($group['page_numbers'] ?? []))),
+                'atelier_url' => '',
+                'price_per_ticket' => 0,
+                'currency' => 'EUR',
+                'description' => '',
+                'image_url' => '',
+                '_needs_review' => 1,
+                '_blocked_reason' => $reason,
+            ];
+            $event['_import_key'] = $this->event_import_key($event);
+            $events[] = $event;
+        }
+        return [
+            'providers' => [],
+            'errors' => [['provider' => $settings['ai_provider'] ?? '', 'error' => $reason]],
+            'consensus' => $events,
+            'selected_provider' => $settings['ai_provider'] ?? '',
+            'pdf_analysis' => $pdf_analysis,
+            'price_errors' => [],
+            'source_pdf_path' => $source_pdf,
+            'source_filename' => $settings['_source_filename'] ?? '',
+            'import_id' => $settings['_import_id'] ?? '',
+        ];
+    }
+
+    private function redirect_analysis_notice(string $message, bool $success = false): void {
+        set_transient('enovos_ticket_shop_analysis_notice_' . get_current_user_id(), [
+            'message' => $message,
+            'success' => $success,
+        ], 5 * MINUTE_IN_SECONDS);
         wp_safe_redirect(admin_url('admin.php?page=enovos-ticket-shop'));
         exit;
     }
@@ -657,6 +783,16 @@ final class Plugin {
         foreach ($analysis['consensus'] as $event) {
             $key = $event['_import_key'] ?? $this->event_import_key($event);
             if (!in_array($key, $selected_keys, true)) continue;
+            if (
+                !empty($event['_blocked_reason'])
+                || empty($event['title'])
+                || empty($event['date'])
+                || empty($event['atelier_url'])
+                || empty($event['price_verified'])
+                || (float) ($event['price_per_ticket'] ?? 0) <= 0
+            ) {
+                wp_die(esc_html('Blocked concert cannot be imported: ' . ($event['title'] ?? 'Unknown concert') . '.'));
+            }
             $pages = array_values(array_filter(array_map('intval', (array)($event['page_numbers'] ?? []))));
             $possible = intdiv(count($pages), 2);
             $qty = isset($posted_quantities[$key]) ? max(1, (int)$posted_quantities[$key]) : $possible;

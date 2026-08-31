@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 0.3.8 – 2026-08-31
+- Added deterministic PDF text analysis to identify the real page count and group ticket pages by concert before AI enrichment.
+- Reconciled AI results with authoritative ticket groups so missing events remain visible and footer advertisements cannot create phantom events.
+- Added tolerant ticket date normalization and complete page-number merging.
+- Fixed the OpenAI multipart upload line endings.
+- Kept concerts with failed price verification visible as Blocked, with the reason and full PDF page coverage in the import check.
+- Analysis failures now return to the dashboard with a notice and a useful summary; the dashboard log falls back to the protected log file.
+
 ## Version 0.3.7 – 2026-08-12
 - Added bundled FPDI/FPDF (`setasign/fpdi` + `setasign/fpdf`) as a pure-PHP PDF engine so two-ticket packages can be built without Poppler on the server.
 - Engine preference is now Poppler → FPDI/FPDF → Imagick, with automatic fallback if an engine fails (e.g. unsupported PDF features in free FPDI).

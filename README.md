@@ -15,6 +15,8 @@ WordPress / WooCommerce plugin for importing concert ticket PDFs into products a
 
 - One PDF page is one physical ticket.
 - Two physical tickets form one WooCommerce stock unit and one protected PDF package.
+- Ticket pages are grouped deterministically from the PDF text before AI enrichment. The importer reconciles AI results with these page groups and reports page coverage, missing enrichment, and blocked prices in the import check.
+- Event advertisements printed in ticket footers are ignored and cannot become products.
 - The product price is the verified public price of one ticket, rounded upward to the next full EUR amount.
 - The ticket PDF price is never used.
 - Products are Simple Products, stock managed, Sold individually, and assigned to product category `den-atelier`.
@@ -29,6 +31,8 @@ Choose exactly one provider in **Enovos Tickets > Settings**:
 - Custom AI
 
 Only the selected provider is called. Custom AI supports Bearer authentication, a configurable API-key header, or no authentication.
+
+If AI enrichment or public-price verification fails, every deterministically detected concert remains visible in the import check as **Blocked** with a reason. Analysis failures also return to the dashboard and write a summary containing the PDF page count, detected groups, ready events, blocked events, and unassigned pages.
 
 ## Settings toggles
 

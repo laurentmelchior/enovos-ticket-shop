@@ -34,6 +34,13 @@ final class AI {
 
     public static function extract_from_pdf(string $pdf_path, array $settings): array|\WP_Error {
         $provider = self::selected_provider($settings);
+        $pdf_analysis = PdfText::analyze($pdf_path);
+        Logger::log('STEP', 'Deterministic PDF analysis completed', [
+            'pages' => $pdf_analysis['page_count'],
+            'groups' => count($pdf_analysis['groups']),
+            'assigned_pages' => count($pdf_analysis['assigned_pages']),
+            'unassigned_pages' => $pdf_analysis['unassigned_pages'],
+        ]);
         Logger::log('STEP', 'Selected AI provider', ['provider' => $provider]);
         if (!$provider) {
             return new \WP_Error('no_ai_provider', 'No AI provider is selected.');
@@ -42,27 +49,34 @@ final class AI {
         if ($provider === 'openai') {
             if (empty($settings['openai_api_key'])) return new \WP_Error('openai_not_configured', 'OpenAI is selected but no API key is configured.');
             Logger::log('START', 'OpenAI analysis started');
-            $result = self::openai($pdf_path, $settings);
+            $result = self::openai($pdf_path, $settings, $pdf_analysis);
         } elseif ($provider === 'gemini') {
             if (empty($settings['gemini_api_key'])) return new \WP_Error('gemini_not_configured', 'Gemini is selected but no API key is configured.');
             Logger::log('START', 'Gemini analysis started');
-            $result = self::gemini($pdf_path, $settings);
+            $result = self::gemini($pdf_path, $settings, $pdf_analysis);
         } else {
             if (empty($settings['custom_ai_endpoint'])) return new \WP_Error('custom_not_configured', 'Custom AI is selected but no endpoint is configured.');
             Logger::log('START', 'Custom AI analysis started');
-            $result = self::custom($pdf_path, $settings);
+            $result = self::custom($pdf_path, $settings, $pdf_analysis);
         }
 
         if (is_wp_error($result)) {
             Logger::log('FAIL', ucfirst($provider) . ' analysis failed', ['error' => $result->get_error_message()]);
             return $result;
         }
-        Logger::log('OK', ucfirst($provider) . ' analysis completed', ['events' => count($result['events'] ?? [])]);
+        $ai_event_count = count($result['events'] ?? []);
+        $result = self::reconcile($result, $pdf_analysis);
+        unset($pdf_analysis['pages']);
+        Logger::log('OK', ucfirst($provider) . ' analysis completed', [
+            'ai_events' => $ai_event_count,
+            'reconciled_events' => count($result['events'] ?? []),
+        ]);
         return [
             'providers' => [$provider => $result],
             'errors' => [],
             'consensus' => self::consensus([$provider => $result]),
             'selected_provider' => $provider,
+            'pdf_analysis' => $pdf_analysis,
         ];
     }
 
@@ -245,15 +259,34 @@ final class AI {
         return true;
     }
 
-    private static function prompt(): string {
+    private static function prompt(array $pdf_analysis = []): string {
+        $page_count = (int) ($pdf_analysis['page_count'] ?? 0);
+        $groups = [];
+        foreach (($pdf_analysis['groups'] ?? []) as $group) {
+            $groups[] = sprintf(
+                '- pages %s: title hint "%s", date %s, venue "%s"',
+                implode(',', $group['page_numbers'] ?? []),
+                (string) ($group['title_guess'] ?? ''),
+                (string) ($group['date'] ?? ''),
+                (string) ($group['venue'] ?? '')
+            );
+        }
+        $group_context = $groups ? implode("\n", $groups) : '- no deterministic text groups available';
         return <<<TXT
 You are an extraction engine for a Luxembourg concert ticket ecommerce importer.
 Analyze the attached PDF ticket(s) and return ONLY JSON matching the supplied schema.
+The PDF contains {$page_count} physical ticket pages.
+Deterministic text extraction found these authoritative page groups:
+{$group_context}
 Rules:
 - Each PDF page is one physical ticket.
 - Group tickets belonging to the same concert using concert title + date + venue.
 - ticket_count is the actual number of physical tickets in the PDF for that concert.
 - page_numbers must contain the exact 1-based PDF page number of every physical ticket belonging to that concert. Never infer missing pages from a printed "Ticket X of Y" counter.
+- Treat the deterministic page groups above as authoritative for page assignment.
+- Ticket dates may be printed as DD/MM/YY. Return them as YYYY-MM-DD.
+- Ignore the event advertisements at the bottom of each ticket. They mention other artists and dates but are not tickets in this PDF.
+- Different venues and ticket types can identify different events even when the date is the same. Different ticket types for the same title, date and venue remain one event.
 - The PDF price is NOT the sell price. It may be 0 because tickets are complimentary.
 - Find the concrete concert page on atelier.lu for each event.
 - On that Atelier concert page, determine the current public ticket price for one ticket.
@@ -266,7 +299,7 @@ Rules:
 TXT;
     }
 
-    private static function openai(string $pdf_path, array $settings) {
+    private static function openai(string $pdf_path, array $settings, array $pdf_analysis = []) {
         $api_key = trim($settings['openai_api_key']);
         $model = trim($settings['openai_model'] ?: 'gpt-5');
 
@@ -286,7 +319,7 @@ TXT;
             'input' => [[
                 'role' => 'user',
                 'content' => [
-                    ['type' => 'input_text', 'text' => self::prompt()],
+                    ['type' => 'input_text', 'text' => self::prompt($pdf_analysis)],
                     ['type' => 'input_file', 'file_id' => $file_id],
                 ],
             ]],
@@ -353,7 +386,7 @@ TXT;
         ];
     }
 
-    private static function gemini(string $pdf_path, array $settings) {
+    private static function gemini(string $pdf_path, array $settings, array $pdf_analysis = []) {
         $key = trim($settings['gemini_api_key']);
         $model = trim($settings['gemini_model'] ?: 'gemini-3.6-flash');
         $size = filesize($pdf_path);
@@ -370,7 +403,7 @@ TXT;
             'contents' => [[
                 'parts' => [
                     ['inlineData' => ['mimeType' => 'application/pdf', 'data' => base64_encode($bytes)]],
-                    ['text' => self::prompt()],
+                    ['text' => self::prompt($pdf_analysis)],
                 ],
             ]],
             'generationConfig' => [
@@ -398,7 +431,6 @@ TXT;
             Logger::log('FAIL', 'Gemini HTTP/API error', [
                 'status' => $code,
                 'model' => $model,
-                'body' => self::safe_excerpt($raw_body),
             ]);
             return new \WP_Error('gemini_response', 'Gemini API error.', ['status' => $code, 'body' => $data]);
         }
@@ -419,7 +451,7 @@ TXT;
         return $json;
     }
 
-    private static function custom(string $pdf_path, array $settings) {
+    private static function custom(string $pdf_path, array $settings, array $pdf_analysis = []) {
         $bytes = file_get_contents($pdf_path);
         if ($bytes === false) {
             return new \WP_Error('custom_file_read', 'PDF could not be read.');
@@ -427,7 +459,7 @@ TXT;
         $headers = self::custom_headers($settings);
         $body = [
             'model' => trim($settings['custom_ai_model'] ?? ''),
-            'prompt' => self::prompt(),
+            'prompt' => self::prompt($pdf_analysis),
             'pdf_base64' => base64_encode($bytes),
             'mime_type' => 'application/pdf',
             'schema' => self::SCHEMA,
@@ -545,7 +577,6 @@ TXT;
             Logger::log('FAIL', 'Gemini Atelier HTTP/API error', [
                 'status' => $code,
                 'model' => trim($settings['gemini_model'] ?: 'gemini-3.6-flash'),
-                'body' => self::safe_excerpt($raw_body),
             ]);
             return new \WP_Error('gemini_enrichment_response', 'Gemini Atelier API error.', ['status' => $code, 'body' => $data]);
         }
@@ -899,13 +930,13 @@ TXT;
         $body = '';
         foreach ($fields as $name => $value) {
             $body .= "--{$boundary}\r\n";
-            $body .= 'Content-Disposition: form-data; name="' . $name . '"\r\n\r\n';
+            $body .= 'Content-Disposition: form-data; name="' . $name . "\"\r\n\r\n";
             $body .= $value . "\r\n";
         }
         $filename = basename($file_path);
         $mime = 'application/pdf';
         $body .= "--{$boundary}\r\n";
-        $body .= 'Content-Disposition: form-data; name="file"; filename="' . $filename . '"\r\n';
+        $body .= 'Content-Disposition: form-data; name="file"; filename="' . $filename . "\"\r\n";
         $body .= 'Content-Type: ' . $mime . "\r\n\r\n";
         $body .= file_get_contents($file_path);
         $body .= "\r\n--{$boundary}--\r\n";
@@ -969,9 +1000,105 @@ TXT;
         return $value;
     }
 
+    private static function reconcile(array $payload, array $pdf_analysis): array {
+        $groups = $pdf_analysis['groups'] ?? [];
+        if (!$groups) {
+            return $payload;
+        }
+
+        $events = [];
+        foreach (($payload['events'] ?? []) as $event) {
+            if (is_array($event)) {
+                $events[] = self::normalize_event($event);
+            }
+        }
+        $used = [];
+        $reconciled = [];
+
+        foreach ($groups as $group) {
+            $best_index = null;
+            $best_score = 0;
+            foreach ($events as $index => $event) {
+                if (isset($used[$index])) {
+                    continue;
+                }
+                $overlap = count(array_intersect(
+                    (array) ($group['page_numbers'] ?? []),
+                    (array) ($event['page_numbers'] ?? [])
+                ));
+                $date_match = !empty($group['date']) && $group['date'] === ($event['date'] ?? '');
+                $title_match = self::titles_match(
+                    (string) ($group['title_guess'] ?? ''),
+                    (string) ($event['title'] ?? '')
+                );
+                $score = ($overlap * 100) + ($date_match ? 10 : 0) + ($title_match ? 5 : 0);
+                if ($score > $best_score) {
+                    $best_score = $score;
+                    $best_index = $index;
+                }
+            }
+
+            if ($best_index !== null && $best_score >= 5) {
+                $event = $events[$best_index];
+                $used[$best_index] = true;
+            } else {
+                $event = [
+                    'title' => (string) ($group['title_guess'] ?? ''),
+                    'date' => (string) ($group['date'] ?? ''),
+                    'atelier_url' => '',
+                    'price_per_ticket' => 0,
+                    'currency' => 'EUR',
+                    'description' => '',
+                    'image_url' => '',
+                    '_needs_review' => 1,
+                    '_blocked_reason' => 'The AI did not return enrichment data for this detected ticket group.',
+                ];
+                Logger::log('FAIL', 'AI event missing for deterministic ticket group', [
+                    'title' => $event['title'],
+                    'date' => $event['date'],
+                    'pages' => $group['page_numbers'] ?? [],
+                ]);
+            }
+
+            $event['title'] = $event['title'] ?: (string) ($group['title_guess'] ?? '');
+            $event['date'] = (string) ($group['date'] ?? $event['date'] ?? '');
+            $event['venue'] = (string) ($group['venue'] ?? '');
+            $event['page_numbers'] = array_values(array_map('intval', (array) ($group['page_numbers'] ?? [])));
+            $event['ticket_count'] = count($event['page_numbers']);
+            $reconciled[] = $event;
+        }
+
+        foreach ($events as $index => $event) {
+            if (!isset($used[$index])) {
+                Logger::log('FAIL', 'AI event discarded because it does not match a ticket page group', [
+                    'title' => $event['title'] ?? '',
+                    'date' => $event['date'] ?? '',
+                    'pages' => $event['page_numbers'] ?? [],
+                ]);
+            }
+        }
+
+        $payload['events'] = $reconciled;
+        return $payload;
+    }
+
+    private static function titles_match(string $left, string $right): bool {
+        $normalize = static function (string $value): string {
+            $value = strtolower(remove_accents($value));
+            return preg_replace('/[^a-z0-9]+/', '', $value) ?: '';
+        };
+        $left = $normalize($left);
+        $right = $normalize($right);
+        return $left !== '' && $right !== '' && (
+            $left === $right
+            || str_contains($left, $right)
+            || str_contains($right, $left)
+        );
+    }
+
     private static function normalize_event(array $event): array {
         $event['title'] = trim((string)($event['title'] ?? ''));
-        $event['date'] = preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)($event['date'] ?? '')) ? $event['date'] : '';
+        $event['date'] = self::normalize_date((string) ($event['date'] ?? ''));
         $event['ticket_count'] = max(0, (int)($event['ticket_count'] ?? 0));
         $event['page_numbers'] = array_values(array_unique(array_filter(array_map('intval', (array)($event['page_numbers'] ?? [])), static fn($v) => $v > 0)));
         sort($event['page_numbers'], SORT_NUMERIC);
@@ -986,6 +1113,30 @@ TXT;
         $event['description'] = wp_kses_post((string)($event['description'] ?? ''));
         $event['image_url'] = esc_url_raw((string)($event['image_url'] ?? ''));
         return $event;
+    }
+
+    private static function normalize_date(string $value): string {
+        $value = trim($value);
+        if (preg_match('/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/', $value, $match)) {
+            $year = (int) $match[1];
+            $month = (int) $match[2];
+            $day = (int) $match[3];
+        } elseif (preg_match('/^(\d{2})\/(\d{2})\/(\d{2}|\d{4})$/', $value, $match)) {
+            $day = (int) $match[1];
+            $month = (int) $match[2];
+            $year = (int) $match[3];
+            if ($year < 100) {
+                $year += 2000;
+            }
+        } else {
+            Logger::log('FAIL', 'AI event date could not be normalized', ['date' => $value]);
+            return '';
+        }
+        if (!checkdate($month, $day, $year)) {
+            Logger::log('FAIL', 'AI event date is invalid', ['date' => $value]);
+            return '';
+        }
+        return sprintf('%04d-%02d-%02d', $year, $month, $day);
     }
 
     private static function consensus(array $providers): array {
@@ -1006,7 +1157,15 @@ TXT;
             $events = $bucket['events'];
             usort($events, static fn($a, $b) => strcmp($b['title'], $a['title']));
             $base = $events[0];
-            foreach (['ticket_count','atelier_url','price_per_ticket','currency','description','image_url'] as $field) {
+            $page_numbers = [];
+            foreach ($events as $event) {
+                $page_numbers = array_merge($page_numbers, (array) ($event['page_numbers'] ?? []));
+            }
+            $page_numbers = array_values(array_unique(array_filter(array_map('intval', $page_numbers), static fn($page) => $page > 0)));
+            sort($page_numbers, SORT_NUMERIC);
+            $base['page_numbers'] = $page_numbers;
+            $base['ticket_count'] = count($page_numbers);
+            foreach (['atelier_url','price_per_ticket','currency','description','image_url'] as $field) {
                 $values = [];
                 foreach ($events as $event) {
                     $v = $event[$field] ?? '';
@@ -1018,11 +1177,8 @@ TXT;
                     $counts = array_count_values($values);
                     arsort($counts);
                     $chosen = array_key_first($counts);
-                    if (is_numeric($chosen) && in_array($field, ['ticket_count','price_per_ticket'], true)) {
+                    if (is_numeric($chosen) && $field === 'price_per_ticket') {
                         $base[$field] = (float)$chosen;
-                        if ($field === 'ticket_count') {
-                            $base[$field] = (int)$base[$field];
-                        }
                     } else {
                         $base[$field] = $chosen;
                     }
