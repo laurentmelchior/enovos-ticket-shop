@@ -196,7 +196,7 @@ final class Plugin {
         echo '<div class="enovos-status-card"><span class="label">Ticket delivery</span><span class="value">' . esc_html(ucfirst((string) $settings['delivery_order_status'])) . '</span></div>';
         echo '</div>';
 
-        echo '<div class="enovos-panel"><p style="margin:0"><strong>Sales logic:</strong> 2 physical ticket pages = 1 protected ticket PDF package = 1 WooCommerce stock unit. Product price = verified one-ticket public price rounded upward to a full EUR amount.</p></div>';
+        echo '<div class="enovos-panel"><p style="margin:0"><strong>Sales logic:</strong> 2 physical ticket pages = 1 protected ticket PDF package = 1 WooCommerce stock unit. Product price = reviewed one-ticket public price rounded upward to a full EUR amount.</p></div>';
 
         if (!empty($settings['show_debug_log'])) {
             $this->render_log((int) $settings['admin_page_size']);
@@ -238,7 +238,7 @@ final class Plugin {
                 . esc_html(implode(', ', array_map('intval', $pdf_analysis['unassigned_pages']))) . '</p></div>';
         }
         if (!empty($analysis['price_errors'])) {
-            echo '<div class="notice notice-warning inline"><p><strong>Some concerts are blocked:</strong></p><ul>';
+            echo '<div class="notice notice-warning inline"><p><strong>Some prices require review:</strong></p><ul>';
             foreach ($analysis['price_errors'] as $price_error) {
                 echo '<li>' . esc_html((string) ($price_error['title'] ?? 'Concert')) . ': '
                     . esc_html((string) ($price_error['error'] ?? 'Ticket price could not be verified.')) . '</li>';
@@ -257,30 +257,46 @@ final class Plugin {
             $key = $event['_import_key'] ?? $this->event_import_key($event);
             $pages = array_values(array_filter(array_map('intval', (array) ($event['page_numbers'] ?? []))));
             $possible = intdiv(count($pages), 2);
-            $valid = !empty($engine['available']) && !empty($event['title']) && !empty($event['date']) && !empty($event['atelier_url']) && !empty($event['price_verified']) && (float) ($event['price_per_ticket'] ?? 0) > 0 && $possible > 0;
+            $price = (float) ($event['price_per_ticket'] ?? 0);
+            $structurally_valid = !empty($engine['available']) && !empty($event['title']) && !empty($event['date']) && $possible > 0;
             $blocked_reason = (string) ($event['_blocked_reason'] ?? '');
-            if (!$valid && $blocked_reason === '') {
+            if (!$structurally_valid && $blocked_reason === '') {
                 $missing = [];
                 if (empty($engine['available'])) $missing[] = 'PDF engine unavailable';
                 if (empty($event['title'])) $missing[] = 'title missing';
                 if (empty($event['date'])) $missing[] = 'date missing';
-                if (empty($event['atelier_url'])) $missing[] = 'Atelier URL missing';
-                if (empty($event['price_verified']) || (float) ($event['price_per_ticket'] ?? 0) <= 0) $missing[] = 'price not verified';
                 if ($possible <= 0) $missing[] = 'fewer than two ticket pages';
                 $blocked_reason = implode(', ', $missing);
             }
+            if (!$structurally_valid) {
+                $status = 'Blocked';
+            } elseif (!empty($event['price_verified']) && $price > 0) {
+                $status = 'Verified';
+            } elseif (!empty($event['price_suggested']) && $price > 0) {
+                $status = 'Suggested – review';
+            } else {
+                $status = 'Manual price required';
+            }
+            $warnings = [];
+            if (empty($event['atelier_url'])) $warnings[] = 'Atelier URL missing';
+            if (!empty($event['_analysis_warning'])) $warnings[] = (string) $event['_analysis_warning'];
+            if (!empty($event['_price_warning'])) $warnings[] = (string) $event['_price_warning'];
             echo '<tr>';
-            echo '<td><input type="checkbox" class="enovos-import-check" name="selected_events[]" value="' . esc_attr($key) . '" ' . checked($valid && $auto_select, true, false) . ' ' . disabled($valid, false, false) . '></td>';
+            echo '<td><input type="checkbox" class="enovos-import-check" name="selected_events[]" value="' . esc_attr($key) . '" ' . checked($structurally_valid && !empty($event['price_verified']) && $price > 0 && $auto_select, true, false) . ' ' . disabled($structurally_valid, false, false) . '></td>';
             echo '<td><strong>' . esc_html($event['title'] ?? '') . '</strong></td>';
             echo '<td>' . esc_html($event['date'] ?? '') . '</td>';
             echo '<td>' . esc_html(count($pages) ? implode(', ', $pages) : 'Missing') . '</td>';
             echo '<td>' . esc_html((string) $possible) . '</td>';
-            echo '<td><input type="number" min="1" max="' . esc_attr((string) max(1, $possible)) . '" step="1" name="product_quantity[' . esc_attr($key) . ']" value="' . esc_attr((string) max(1, $possible)) . '" style="width:80px" ' . disabled($valid, false, false) . '></td>';
-            echo '<td><strong>' . esc_html(number_format_i18n((float) ($event['price_per_ticket'] ?? 0), 2)) . ' €</strong></td>';
+            echo '<td><input type="number" min="1" max="' . esc_attr((string) max(1, $possible)) . '" step="1" name="product_quantity[' . esc_attr($key) . ']" value="' . esc_attr((string) max(1, $possible)) . '" style="width:80px" ' . disabled($structurally_valid, false, false) . '></td>';
+            echo '<td><input type="text" inputmode="decimal" class="small-text enovos-event-price" name="event_price[' . esc_attr($key) . ']" value="' . esc_attr($price > 0 ? number_format($price, 2, '.', '') : '') . '" placeholder="0.00" aria-label="' . esc_attr('Ticket price for ' . ($event['title'] ?? 'concert')) . '" ' . disabled($structurally_valid, false, false) . '> €';
+            if (!empty($event['price_source']) && filter_var($event['price_source'], FILTER_VALIDATE_URL)) {
+                echo '<br><a target="_blank" rel="noopener" href="' . esc_url($event['price_source']) . '">Price source</a>';
+            }
+            echo '</td>';
             echo '<td>' . (!empty($event['atelier_url']) ? '<a target="_blank" rel="noopener" href="' . esc_url($event['atelier_url']) . '">Open</a>' : 'Missing') . '</td>';
             echo '<td>' . (!empty($event['image_url']) ? '<span style="color:green">Found</span>' : '<span style="color:#996800">Missing</span>') . '</td>';
-            echo '<td>' . ($valid ? '<span style="color:green;font-weight:600">Ready</span>' : '<span style="color:#b32d2e;font-weight:600">Blocked</span>') . '</td>';
-            echo '<td>' . ($valid ? '—' : esc_html($blocked_reason)) . '</td>';
+            echo '<td><span style="font-weight:600">' . esc_html($status) . '</span></td>';
+            echo '<td>' . esc_html(!$structurally_valid ? $blocked_reason : ($warnings ? implode(', ', $warnings) : '—')) . '</td>';
             echo '</tr>';
         }
         echo '</tbody></table><p><button class="button button-primary" type="submit">Import selected products and create ticket packages</button></p></form>';
@@ -673,13 +689,13 @@ final class Plugin {
             $message = $result->get_error_message();
             $result = $this->blocked_analysis_from_pdf($source_pdf, $settings, $message);
             set_transient('enovos_ticket_shop_last_analysis_' . get_current_user_id(), $result, 6 * HOUR_IN_SECONDS);
-            Logger::log('FAIL', 'PDF analysis completed with only deterministic blocked groups', [
+            Logger::log('FAIL', 'PDF analysis completed with deterministic groups requiring manual review', [
                 'filename' => $settings['_source_filename'],
                 'pages' => (int) ($result['pdf_analysis']['page_count'] ?? 0),
                 'groups' => count($result['consensus'] ?? []),
                 'error' => $message,
             ]);
-            $this->redirect_analysis_notice('AI analysis failed. Detected ticket groups are shown as blocked: ' . $message);
+            $this->redirect_analysis_notice('AI analysis failed. Detected ticket groups remain available for manual pricing: ' . $message);
         }
 
         $enriched = [];
@@ -690,9 +706,26 @@ final class Plugin {
             }
             $verified = AI::verify_atelier_price($event, $settings);
             if (is_wp_error($verified)) {
-                $price_errors[] = ['title'=>$event['title'] ?? '', 'error'=>$verified->get_error_message()];
                 Logger::log('FAIL', 'Price verification failed during analysis', ['title'=>$event['title'] ?? '', 'error'=>$verified->get_error_message()]);
-                $event['_blocked_reason'] = $verified->get_error_message();
+                Logger::log('START', 'Broader web price search started', ['title' => $event['title'] ?? '']);
+                $suggested = AI::suggest_event_price($event, $settings);
+                if (is_wp_error($suggested)) {
+                    $warning = $verified->get_error_message() . ' ' . $suggested->get_error_message();
+                    $price_errors[] = ['title' => $event['title'] ?? '', 'error' => $warning];
+                    $event['_price_warning'] = $warning;
+                    Logger::log('FAIL', 'No broader web price suggestion found', [
+                        'title' => $event['title'] ?? '',
+                        'error' => $suggested->get_error_message(),
+                    ]);
+                } else {
+                    $event = array_merge($event, $suggested);
+                    $event['_price_warning'] = 'Price found outside the official Atelier verification flow; review before import.';
+                    Logger::log('OK', 'Broader web price suggestion found', [
+                        'title' => $event['title'] ?? '',
+                        'price' => $event['price_per_ticket'] ?? 0,
+                        'source' => $event['price_source'] ?? '',
+                    ]);
+                }
             } else {
                 $event = array_merge($event, $verified);
             }
@@ -706,7 +739,7 @@ final class Plugin {
         $result['source_filename'] = $settings['_source_filename'];
         $result['import_id'] = $import_id;
         set_transient('enovos_ticket_shop_last_analysis_' . get_current_user_id(), $result, 6 * HOUR_IN_SECONDS);
-        $ready = count(array_filter($enriched, static fn($event) => !empty($event['price_verified']) && (float) ($event['price_per_ticket'] ?? 0) > 0));
+        $ready = count(array_filter($enriched, static fn($event) => (float) ($event['price_per_ticket'] ?? 0) > 0));
         $provider_events = 0;
         foreach (($result['providers'] ?? []) as $provider_result) {
             $provider_events += count($provider_result['events'] ?? []);
@@ -717,13 +750,13 @@ final class Plugin {
             'groups' => count($result['pdf_analysis']['groups'] ?? []),
             'ai_events' => $provider_events,
             'reconciled_events' => count($enriched),
-            'ready_events' => $ready,
-            'blocked_events' => count($enriched) - $ready,
+            'events_with_price' => $ready,
+            'events_requiring_manual_price' => count($enriched) - $ready,
             'unassigned_pages' => $result['pdf_analysis']['unassigned_pages'] ?? [],
         ]);
         $message = $ready > 0
-            ? sprintf('Analysis completed: %d concert(s) ready and %d blocked.', $ready, count($enriched) - $ready)
-            : 'Analysis completed, but all detected concerts are blocked. Review the reasons below.';
+            ? sprintf('Analysis completed: %d concert(s) have a price and %d require manual pricing.', $ready, count($enriched) - $ready)
+            : 'Analysis completed. Enter a positive ticket price for the concerts you want to import.';
         $this->redirect_analysis_notice($message, $ready > 0);
     }
 
@@ -744,7 +777,7 @@ final class Plugin {
                 'description' => '',
                 'image_url' => '',
                 '_needs_review' => 1,
-                '_blocked_reason' => $reason,
+                '_price_warning' => $reason,
             ];
             $event['_import_key'] = $this->event_import_key($event);
             $events[] = $event;
@@ -779,6 +812,7 @@ final class Plugin {
         if (!$analysis || empty($analysis['consensus']) || empty($analysis['source_pdf_path']) || !is_readable($analysis['source_pdf_path'])) wp_die('No valid analysis or protected source PDF is available. Please analyze the PDF again.');
         $selected_keys = isset($_POST['selected_events']) && is_array($_POST['selected_events']) ? array_map('sanitize_text_field', wp_unslash($_POST['selected_events'])) : [];
         $posted_quantities = isset($_POST['product_quantity']) && is_array($_POST['product_quantity']) ? wp_unslash($_POST['product_quantity']) : [];
+        $posted_prices = isset($_POST['event_price']) && is_array($_POST['event_price']) ? wp_unslash($_POST['event_price']) : [];
         $selected_events = [];
         foreach ($analysis['consensus'] as $event) {
             $key = $event['_import_key'] ?? $this->event_import_key($event);
@@ -787,9 +821,6 @@ final class Plugin {
                 !empty($event['_blocked_reason'])
                 || empty($event['title'])
                 || empty($event['date'])
-                || empty($event['atelier_url'])
-                || empty($event['price_verified'])
-                || (float) ($event['price_per_ticket'] ?? 0) <= 0
             ) {
                 wp_die(esc_html('Blocked concert cannot be imported: ' . ($event['title'] ?? 'Unknown concert') . '.'));
             }
@@ -797,6 +828,26 @@ final class Plugin {
             $possible = intdiv(count($pages), 2);
             $qty = isset($posted_quantities[$key]) ? max(1, (int)$posted_quantities[$key]) : $possible;
             if ($possible <= 0 || $qty > $possible) wp_die(esc_html('Invalid product quantity for ' . ($event['title'] ?? 'concert') . '. Maximum available ticket packages: ' . $possible));
+            $price = self::parse_event_price($posted_prices[$key] ?? '');
+            if (is_wp_error($price)) {
+                wp_die(esc_html('Invalid ticket price for ' . ($event['title'] ?? 'concert') . ': ' . $price->get_error_message()));
+            }
+            $original_price = (float) ($event['price_per_ticket'] ?? 0);
+            $price_changed = abs($original_price - $price) > 0.00001;
+            $event['verified_price_before_rounding'] = $price;
+            $event['price_per_ticket'] = AI::round_price_up($price);
+            $event['price_approved'] = 1;
+            if ($price_changed || (empty($event['price_verified']) && empty($event['price_suggested']))) {
+                $event['price_verified'] = 0;
+                $event['price_suggested'] = 0;
+                $event['price_source'] = 'manual';
+                $event['price_verification_method'] = 'manual';
+            } elseif (!empty($event['price_suggested'])) {
+                $event['price_verified'] = 0;
+                $event['price_source'] = (string) ($event['price_source'] ?? '');
+                $event['price_verification_method'] = 'suggested_approved';
+            }
+            unset($event['_price_warning']);
             $event['product_quantity'] = $qty;
             $selected_events[] = $event;
         }
@@ -835,6 +886,22 @@ final class Plugin {
         Logger::log('OK', 'Product import and ticket package generation completed', ['selected'=>count($selected_events), 'created'=>count($result['created']), 'errors'=>count($result['errors'])]);
         wp_safe_redirect(admin_url('admin.php?page=enovos-ticket-shop'));
         exit;
+    }
+
+    private static function parse_event_price($raw): float|\WP_Error {
+        if (!is_scalar($raw)) {
+            return new \WP_Error('invalid_manual_price', 'Enter a positive amount using at most two decimal places.');
+        }
+        $value = trim((string) $raw);
+        $value = str_replace(["\xc2\xa0", ' '], '', $value);
+        if (!preg_match('/^\d{1,4}(?:[.,]\d{1,2})?$/', $value)) {
+            return new \WP_Error('invalid_manual_price', 'Enter a positive amount using at most two decimal places.');
+        }
+        $price = (float) str_replace(',', '.', $value);
+        if (!is_finite($price) || $price <= 0 || $price > 5000) {
+            return new \WP_Error('invalid_manual_price', 'The ticket price must be greater than 0 and no more than 5000 EUR.');
+        }
+        return $price;
     }
 
     private function event_import_key(array $event): string {

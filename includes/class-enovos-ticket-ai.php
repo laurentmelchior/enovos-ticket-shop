@@ -596,7 +596,7 @@ TXT;
 
     private static function atelier_prompt(string $url, array $event): string {
         return sprintf(
-            "Find and verify the official Atelier Luxembourg concert page for %s on %s. Candidate URL: %s. Return JSON with the current public ticket price for ONE ticket in EUR, a concise description based on Atelier, the main image URL, and the exact official Atelier concert URL. The PDF price must never be used. The price must be current and match the exact event title and date. Never guess or infer a price from unrelated events. If the exact price cannot be verified from the official Atelier event page or the official ticketing page reached from it, return an empty/unknown price and explain the missing verification in your internal reasoning. The importer will reject unverified prices.",
+            "Find and verify the official Atelier Luxembourg concert page for %s on %s. Candidate URL: %s. Return JSON with the current public ticket price for ONE ticket in EUR, a concise description based on Atelier, the main image URL, and the exact official Atelier concert URL. The PDF price must never be used. The price must be current and match the exact event title and date. Never guess or infer a price from unrelated events. If the exact price cannot be verified from the official Atelier event page or the official ticketing page reached from it, return an empty/unknown price. The administrator can review a broader web suggestion or enter the price manually.",
             $event['title'] ?? '',
             $event['date'] ?? '',
             $url
@@ -604,7 +604,7 @@ TXT;
     }
 
 
-    /** Round a verified ticket price upward to the next full EUR amount. */
+    /** Round a reviewed ticket price upward to the next full EUR amount. */
     public static function round_price_up(float $price): float {
         if ($price <= 0) {
             return 0.0;
@@ -717,7 +717,57 @@ TXT;
         ];
     }
 
-    private static function openai_price_verification(array $event, array $settings) {
+    /**
+     * Search beyond Atelier for an exact-event price suggestion.
+     *
+     * Suggestions are deliberately not marked as verified. An administrator must
+     * approve the editable value in the import check before product creation.
+     */
+    public static function suggest_event_price(array $event, array $settings): array|\WP_Error {
+        $title = trim((string) ($event['title'] ?? ''));
+        $date = trim((string) ($event['date'] ?? ''));
+        if ($title === '' || $date === '') {
+            return new \WP_Error('price_suggestion_missing_context', 'A title and date are required for the broader price search.');
+        }
+
+        $provider = self::selected_provider($settings);
+        if ($provider === 'openai' && !empty($settings['openai_api_key'])) {
+            $result = self::openai_price_verification($event, $settings, true);
+            $method = 'openai_web_suggestion';
+        } elseif ($provider === 'gemini' && !empty($settings['gemini_api_key'])) {
+            $result = self::gemini_price_verification($event, $settings, true);
+            $method = 'gemini_web_suggestion';
+        } elseif ($provider === 'custom' && !empty($settings['custom_ai_endpoint'])) {
+            $result = self::custom_price_verification($event, $settings, true);
+            $method = 'custom_web_suggestion';
+        } else {
+            return new \WP_Error('price_suggestion_provider_missing', 'The selected AI provider is not configured for broader price search.');
+        }
+
+        if (is_wp_error($result)) {
+            return $result;
+        }
+        $price = (float) ($result['price_per_ticket'] ?? 0);
+        $source = esc_url_raw((string) ($result['source_url'] ?? ''));
+        $source_scheme = strtolower((string) wp_parse_url($source, PHP_URL_SCHEME));
+        if ($price <= 0 || $price > 5000 || $source === '' || $source_scheme !== 'https') {
+            return new \WP_Error('price_suggestion_not_found', 'No credible price suggestion was found for the exact concert.');
+        }
+
+        return [
+            'price_per_ticket' => self::round_price_up($price),
+            'verified_price_before_rounding' => $price,
+            'price_rounding' => 'ceil_to_next_full_eur',
+            'currency' => strtoupper((string) ($result['currency'] ?? 'EUR')),
+            'price_source' => $source,
+            'price_verification_method' => $method,
+            'price_verified' => 0,
+            'price_suggested' => 1,
+            'price_evidence' => sanitize_text_field((string) ($result['evidence'] ?? '')),
+        ];
+    }
+
+    private static function openai_price_verification(array $event, array $settings, bool $broader_search = false) {
         $schema = [
             'type' => 'object',
             'properties' => [
@@ -729,10 +779,7 @@ TXT;
             'required' => ['price_per_ticket','currency','source_url','evidence'],
             'additionalProperties' => false,
         ];
-        $prompt = sprintf(
-            "Verify the current public ticket price for exactly this concert: %s on %s in Luxembourg. Official Atelier event URL: %s. Use web search. Prefer the official Atelier page and the official ticketing page linked from Atelier. The result must match the exact event title and exact date. Return the price for ONE standard ticket in EUR, not a package price, fee, donation, or another event. Never use the PDF price and never guess. If you cannot verify the exact current price, return -1 and explain why in evidence.",
-            $event['title'] ?? '', $event['date'] ?? '', $event['atelier_url'] ?? ''
-        );
+        $prompt = self::price_search_prompt($event, $broader_search);
         $body = [
             'model' => trim($settings['openai_model'] ?: 'gpt-5'),
             'tools' => [['type' => 'web_search']],
@@ -760,7 +807,7 @@ TXT;
         return $json;
     }
 
-    private static function gemini_price_verification(array $event, array $settings) {
+    private static function gemini_price_verification(array $event, array $settings, bool $broader_search = false) {
         $schema = [
             'type' => 'object',
             'properties' => [
@@ -771,10 +818,7 @@ TXT;
             ],
             'required' => ['price_per_ticket','currency','source_url','evidence'],
         ];
-        $prompt = sprintf(
-            "Verify the current public ticket price for exactly this concert: %s on %s in Luxembourg. Official Atelier event URL: %s. Use Google Search grounding. Prefer the official Atelier page and the official ticketing page linked from Atelier. The result must match the exact event title and exact date. Return the price for ONE standard ticket in EUR, not a package price, fee, donation, or another event. Never use the PDF price and never guess. If you cannot verify the exact current price, return -1 and explain why in evidence.",
-            $event['title'] ?? '', $event['date'] ?? '', $event['atelier_url'] ?? ''
-        );
+        $prompt = self::price_search_prompt($event, $broader_search);
         $body = [
             'contents' => [['parts' => [['text' => $prompt]]]],
             'tools' => [['google_search' => new \stdClass()]],
@@ -808,12 +852,15 @@ TXT;
     }
 
 
-    private static function custom_price_verification(array $event, array $settings) {
+    private static function custom_price_verification(array $event, array $settings, bool $broader_search = false) {
         $endpoint = esc_url_raw((string)($settings['custom_ai_endpoint'] ?? ''));
         if (!$endpoint) {
             return new \WP_Error('custom_price_endpoint_missing', 'Custom AI endpoint is missing.');
         }
-        $page = wp_remote_get(esc_url_raw((string)($event['atelier_url'] ?? '')), ['timeout' => 30, 'redirection' => 5]);
+        $atelier_url = esc_url_raw((string) ($event['atelier_url'] ?? ''));
+        $page = $atelier_url !== ''
+            ? wp_remote_get($atelier_url, ['timeout' => 30, 'redirection' => 5])
+            : new \WP_Error('atelier_url_missing', 'Atelier URL is missing.');
         $page_text = '';
         if (!is_wp_error($page)) {
             $page_text = wp_strip_all_tags(wp_remote_retrieve_body($page));
@@ -821,10 +868,7 @@ TXT;
             $page_text = substr($page_text, 0, 30000);
         }
         $headers = self::custom_headers($settings);
-        $prompt = sprintf(
-            "Verify the current public ticket price for exactly this concert: %s on %s in Luxembourg. Official Atelier URL: %s. Use only evidence matching the exact event title and date from the provided Atelier page content. Return the price for ONE standard ticket in EUR, not a package, fee, donation, or another event. Never use the PDF price and never guess. If the exact price cannot be verified from the provided content, return 0 and explain why.",
-            $event['title'] ?? '', $event['date'] ?? '', $event['atelier_url'] ?? ''
-        );
+        $prompt = self::price_search_prompt($event, $broader_search);
         $body = [
             'model' => trim($settings['custom_ai_model'] ?? ''),
             'prompt' => $prompt,
@@ -862,6 +906,25 @@ TXT;
             if (is_array($json)) return $json;
         }
         return new \WP_Error('custom_price_json', 'Custom AI price verification response could not be interpreted.');
+    }
+
+    private static function price_search_prompt(array $event, bool $broader_search): string {
+        $base = sprintf(
+            'Find the public price for exactly this concert: %s on %s at %s in Luxembourg. Candidate Atelier URL: %s. The result must match the exact artist or event, date and venue. Return the price for ONE standard ticket in EUR, not a package, fee, resale markup, donation, or another event. Never use the uploaded PDF price and never invent a value.',
+            (string) ($event['title'] ?? ''),
+            (string) ($event['date'] ?? ''),
+            (string) ($event['venue'] ?? ''),
+            (string) ($event['atelier_url'] ?? '')
+        );
+        if ($broader_search) {
+            return $base
+                . ' Search beyond atelier.lu using credible official organizers, primary ticket sellers, venue pages, or exact-event listings. '
+                . 'Return a positive price only when the source explicitly identifies this exact concert. Include the public source URL and short evidence. '
+                . 'If no exact-event price is found, return -1 and explain why.';
+        }
+        return $base
+            . ' Prefer the official Atelier page and the primary ticketing page linked from Atelier. '
+            . 'If the exact current price cannot be verified there, return -1 and explain why.';
     }
 
     private static function extract_direct_price_candidates(string $html): array {
@@ -1051,7 +1114,7 @@ TXT;
                     'description' => '',
                     'image_url' => '',
                     '_needs_review' => 1,
-                    '_blocked_reason' => 'The AI did not return enrichment data for this detected ticket group.',
+                    '_analysis_warning' => 'The AI did not return enrichment data for this detected ticket group.',
                 ];
                 Logger::log('FAIL', 'AI event missing for deterministic ticket group', [
                     'title' => $event['title'],
