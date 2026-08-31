@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 0.3.10 – 2026-08-31
+- Import/Debug Log and the changelog raw view now use black text on a light background.
+- Widened the ticket price input in the import check and right-aligned the amount.
+- The Enovos Tickets page now uses the full window width for the wide import check table.
+
 ## Version 0.3.9 – 2026-08-31
 - Added a broader exact-event web search for price suggestions when the official Atelier price cannot be verified.
 - Made ticket prices editable in the import check, with support for decimal points and commas.

@@ -181,7 +181,7 @@ final class Plugin {
         $engine = PdfPackages::engine_status();
         $attach_me_on = AttachMe::is_active() && !empty($settings['enable_attach_me']);
 
-        echo '<div class="wrap enovos-admin"><h1>Enovos Concert Ticket Shop</h1>';
+        echo '<div class="wrap enovos-admin enovos-admin--wide"><h1>Enovos Concert Ticket Shop</h1>';
         echo '<p class="enovos-admin-lead">Import concert ticket PDFs, create protected two-ticket packages, and deliver them with WooCommerce orders.</p>';
         if (is_array($analysis_notice)) {
             $notice_class = !empty($analysis_notice['success']) ? 'notice-success' : 'notice-warning';
@@ -288,7 +288,7 @@ final class Plugin {
             echo '<td>' . esc_html(count($pages) ? implode(', ', $pages) : 'Missing') . '</td>';
             echo '<td>' . esc_html((string) $possible) . '</td>';
             echo '<td><input type="number" min="1" max="' . esc_attr((string) max(1, $possible)) . '" step="1" name="product_quantity[' . esc_attr($key) . ']" value="' . esc_attr((string) max(1, $possible)) . '" style="width:80px" ' . disabled($structurally_valid, false, false) . '></td>';
-            echo '<td><input type="text" inputmode="decimal" class="small-text enovos-event-price" name="event_price[' . esc_attr($key) . ']" value="' . esc_attr($price > 0 ? number_format($price, 2, '.', '') : '') . '" placeholder="0.00" aria-label="' . esc_attr('Ticket price for ' . ($event['title'] ?? 'concert')) . '" ' . disabled($structurally_valid, false, false) . '> €';
+            echo '<td><input type="text" inputmode="decimal" class="enovos-event-price" name="event_price[' . esc_attr($key) . ']" value="' . esc_attr($price > 0 ? number_format($price, 2, '.', '') : '') . '" placeholder="0.00" aria-label="' . esc_attr('Ticket price for ' . ($event['title'] ?? 'concert')) . '" ' . disabled($structurally_valid, false, false) . '> €';
             if (!empty($event['price_source']) && filter_var($event['price_source'], FILTER_VALIDATE_URL)) {
                 echo '<br><a target="_blank" rel="noopener" href="' . esc_url($event['price_source']) . '">Price source</a>';
             }
