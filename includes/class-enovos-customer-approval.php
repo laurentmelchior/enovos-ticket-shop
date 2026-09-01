@@ -104,19 +104,20 @@ final class CustomerApproval {
         if (isset($_GET['enovos_verify_email'])) {
             self::handle_verification_link();
         }
-        if (isset($_GET['enovos_registration']) && sanitize_key((string) $_GET['enovos_registration']) === 'pending') {
+        $is_get_request = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'GET';
+        if ($is_get_request && isset($_GET['enovos_registration']) && sanitize_key((string) $_GET['enovos_registration']) === 'pending') {
             wc_add_notice(
                 __('Your account was created. Please check your inbox and confirm your email address before signing in.', 'enovos-ticket-shop'),
                 'success'
             );
         }
-        if (isset($_GET['enovos_resend']) && sanitize_key((string) $_GET['enovos_resend']) === 'submitted') {
+        if ($is_get_request && isset($_GET['enovos_resend']) && sanitize_key((string) $_GET['enovos_resend']) === 'submitted') {
             wc_add_notice(
                 __('If an account is waiting for email confirmation, a new verification link has been sent.', 'enovos-ticket-shop'),
                 'success'
             );
         }
-        if (isset($_GET['enovos_verified'])) {
+        if ($is_get_request && isset($_GET['enovos_verified'])) {
             $verification_result = sanitize_key((string) $_GET['enovos_verified']);
             if ($verification_result === 'approved') {
                 wc_add_notice(
