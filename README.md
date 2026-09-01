@@ -74,6 +74,28 @@ Poppler is preferred when installed. On hosts without Poppler (typical managed W
 
 Dependencies are shipped under `vendor/` (`setasign/fpdf`, `setasign/fpdi`). After cloning without `vendor/`, run `composer install --no-dev`.
 
+## Customer approval
+
+New WooCommerce customer accounts use a two-step approval flow:
+
+1. Every new customer receives an email verification link that is valid for 48 hours.
+2. After verification, exact email domains listed under **Enovos Tickets > Settings > Customer approval** are approved automatically.
+3. Verified customers from all other domains remain blocked until a user with the `manage_woocommerce` capability approves them.
+
+Pending accounts cannot sign in or check out. Existing users without an Enovos approval status are unaffected.
+
+Manage waiting accounts under **Enovos Tickets > Pending Customers**. Administrators can review and approve verified customers or resend a verification message to customers who have not confirmed their email. Approval links in administrator emails always require a WordPress login and a separate confirmation click.
+
+Enter one exact domain per line in the whitelist without `@`. A domain does not include its subdomains: for example, `company.com` does not match `shop.company.com`. Approval notification recipients are configurable; when left empty, the WordPress administration email is used.
+
+The following notifications can be enabled and edited under **WooCommerce > Settings > Emails**:
+
+- Customer email verification
+- Customer approval request
+- Customer account approved
+
+The public resend form always returns the same response, whether or not an account exists, and limits repeated requests.
+
 ## WooCommerce delivery
 
 A package is reserved for the order as soon as the order is created. Ticket PDFs are sent only when the order reaches **Completed** (default):

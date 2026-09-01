@@ -207,6 +207,10 @@
   background: linear-gradient(180deg, rgba(240, 240, 241, 0), #f0f0f1 28%);
 }
 
+.enovos-inline-form {
+  display: inline;
+}
+
 .enovos-log-box,
 .enovos-changelog-raw {
   width: 100%;
