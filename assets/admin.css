@@ -250,6 +250,87 @@
 
 .enovos-inline-form {
   display: inline;
+  margin-right: 6px;
+}
+
+.enovos-email-selector {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 18px;
+}
+
+.enovos-email-selector select {
+  min-width: min(420px, 100%);
+}
+
+.enovos-email-editor-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.enovos-email-template-code {
+  width: 100%;
+  min-height: 560px;
+  resize: vertical;
+  white-space: pre;
+}
+
+.enovos-placeholder-reference {
+  max-height: 720px;
+  overflow: auto;
+  padding: 14px;
+  border: 1px solid #dcdcde;
+  border-radius: 8px;
+  background: #f6f7f7;
+}
+
+.enovos-placeholder-reference h3,
+.enovos-placeholder-reference h4 {
+  margin: 0 0 8px;
+}
+
+.enovos-placeholder-reference h4 {
+  margin-top: 16px;
+}
+
+.enovos-placeholder-reference ul {
+  margin: 0;
+}
+
+.enovos-placeholder-reference li {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 6px;
+  opacity: 0.58;
+}
+
+.enovos-placeholder-reference li.is-applicable {
+  opacity: 1;
+}
+
+.enovos-copy-token {
+  position: relative;
+  padding: 3px 6px;
+  border: 1px solid #c3c4c7;
+  border-radius: 4px;
+  background: #fff;
+  text-align: left;
+  cursor: copy;
+}
+
+.enovos-copy-token.is-copied::after {
+  content: "Copied";
+  position: absolute;
+  right: 4px;
+  color: #008a20;
+  font-size: 10px;
+  font-weight: 600;
 }
 
 .enovos-log-box,
@@ -367,5 +448,13 @@
     display: block;
     width: auto;
     padding: 8px 0;
+  }
+
+  .enovos-email-editor-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .enovos-email-template-code {
+    min-height: 420px;
   }
 }

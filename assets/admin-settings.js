@@ -10,10 +10,24 @@
 
   document.addEventListener('DOMContentLoaded', function () {
     var select = document.getElementById('enovos_ai_provider');
-    if (!select) return;
-    syncProviderFields(select);
-    select.addEventListener('change', function () {
+    if (select) {
       syncProviderFields(select);
+      select.addEventListener('change', function () {
+        syncProviderFields(select);
+      });
+    }
+
+    document.querySelectorAll('.enovos-copy-token').forEach(function (button) {
+      button.addEventListener('click', function () {
+        var token = button.getAttribute('data-token') || '';
+        if (!token || !navigator.clipboard) return;
+        navigator.clipboard.writeText(token).then(function () {
+          button.classList.add('is-copied');
+          window.setTimeout(function () {
+            button.classList.remove('is-copied');
+          }, 1200);
+        });
+      });
     });
   });
 })();

@@ -5,44 +5,41 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-final class EmailAdminApproval extends \WC_Email {
+final class EmailCustomerRejected extends \WC_Email {
     public function __construct() {
-        $this->id = 'enovos_admin_customer_approval';
-        $this->title = __('Customer approval request', 'enovos-ticket-shop');
-        $this->description = __('Sent to the configured recipients when a verified customer requires manual approval.', 'enovos-ticket-shop');
-        $this->template_html = 'emails/enovos-admin-approval.php';
-        $this->template_plain = 'emails/plain/enovos-admin-approval.php';
+        $this->id = 'enovos_customer_rejected';
+        $this->customer_email = true;
+        $this->title = __('Customer account rejected', 'enovos-ticket-shop');
+        $this->description = __('Sent to a customer after an administrator rejects the account.', 'enovos-ticket-shop');
+        $this->template_html = 'emails/enovos-customer-rejected.php';
+        $this->template_plain = 'emails/plain/enovos-customer-rejected.php';
         $this->template_base = ENOVOS_TICKET_SHOP_DIR . 'templates/';
         $this->placeholders = [
             '{customer_name}' => '',
             '{customer_email}' => '',
-            '{customer_domain}' => '',
-            '{approve_url}' => '',
-            '{reject_url}' => '',
+            '{shop_url}' => '',
         ];
         parent::__construct();
     }
 
     public function get_default_subject(): string {
-        return __('Customer account requires approval', 'enovos-ticket-shop');
+        return __('Your customer account was not approved', 'enovos-ticket-shop');
     }
 
     public function get_default_heading(): string {
-        return __('Review a new customer account', 'enovos-ticket-shop');
+        return __('Account review completed', 'enovos-ticket-shop');
     }
 
-    public function trigger(int $user_id, string $approve_url, string $reject_url): void {
+    public function trigger(int $user_id): void {
         $this->setup_locale();
         $user = get_userdata($user_id);
         if ($user instanceof \WP_User) {
             $this->object = $user;
-            $this->recipient = CustomerApproval::admin_recipients();
-            $domain = strtolower((string) substr(strrchr($user->user_email, '@') ?: '', 1));
+            $this->recipient = $user->user_email;
             $this->placeholders['{customer_name}'] = $user->display_name;
             $this->placeholders['{customer_email}'] = $user->user_email;
-            $this->placeholders['{customer_domain}'] = $domain;
-            $this->placeholders['{approve_url}'] = $approve_url;
-            $this->placeholders['{reject_url}'] = $reject_url;
+            $shop_url = wc_get_page_permalink('shop');
+            $this->placeholders['{shop_url}'] = is_string($shop_url) && $shop_url !== '' ? $shop_url : home_url('/');
         }
         if ($this->is_enabled() && $this->get_recipient()) {
             $this->send(
@@ -60,12 +57,9 @@ final class EmailAdminApproval extends \WC_Email {
         return wc_get_template_html($this->template_html, [
             'email_heading' => $this->get_heading(),
             'customer_name' => $this->placeholders['{customer_name}'],
-            'customer_email' => $this->placeholders['{customer_email}'],
-            'customer_domain' => $this->placeholders['{customer_domain}'],
-            'approve_url' => $this->placeholders['{approve_url}'],
-            'reject_url' => $this->placeholders['{reject_url}'],
+            'shop_url' => $this->placeholders['{shop_url}'],
             'additional_content' => $this->get_additional_content(),
-            'sent_to_admin' => true,
+            'sent_to_admin' => false,
             'plain_text' => false,
             'email' => $this,
         ], '', $this->template_base);
@@ -75,12 +69,9 @@ final class EmailAdminApproval extends \WC_Email {
         return wc_get_template_html($this->template_plain, [
             'email_heading' => $this->get_heading(),
             'customer_name' => $this->placeholders['{customer_name}'],
-            'customer_email' => $this->placeholders['{customer_email}'],
-            'customer_domain' => $this->placeholders['{customer_domain}'],
-            'approve_url' => $this->placeholders['{approve_url}'],
-            'reject_url' => $this->placeholders['{reject_url}'],
+            'shop_url' => $this->placeholders['{shop_url}'],
             'additional_content' => $this->get_additional_content(),
-            'sent_to_admin' => true,
+            'sent_to_admin' => false,
             'plain_text' => true,
             'email' => $this,
         ], '', $this->template_base);
@@ -97,7 +88,7 @@ final class EmailAdminApproval extends \WC_Email {
             'subject' => [
                 'title' => __('Subject', 'woocommerce'),
                 'type' => 'text',
-                'description' => __('Available placeholders: {site_title}, {customer_name}, {customer_email}, {customer_domain}, {approve_url}, {reject_url}', 'enovos-ticket-shop'),
+                'description' => __('Available placeholders: {site_title}, {customer_name}, {customer_email}, {shop_url}', 'enovos-ticket-shop'),
                 'placeholder' => $this->get_default_subject(),
                 'default' => '',
                 'desc_tip' => true,

@@ -10,6 +10,7 @@ final class CustomerApproval {
     public const STATUS_PENDING_EMAIL = 'pending_email';
     public const STATUS_PENDING_ADMIN = 'pending_admin';
     public const STATUS_APPROVED = 'approved';
+    public const STATUS_REJECTED = 'rejected';
 
     private const TOKEN_HASH_META = '_enovos_verify_token_hash';
     private const TOKEN_EXPIRES_META = '_enovos_verify_expires';
@@ -17,6 +18,7 @@ final class CustomerApproval {
     private const WHITELISTED_META = '_enovos_whitelisted';
     private const VERIFIED_AT_META = '_enovos_email_verified_at';
     private const APPROVED_AT_META = '_enovos_approved_at';
+    private const REJECTED_AT_META = '_enovos_rejected_at';
     private const TOKEN_LIFETIME = 48 * HOUR_IN_SECONDS;
     private const RESEND_LIMIT = 3;
     private const RESEND_WINDOW = 15 * MINUTE_IN_SECONDS;
@@ -94,6 +96,12 @@ final class CustomerApproval {
                 __('Your email address is confirmed. Your account is waiting for administrator approval.', 'enovos-ticket-shop')
             );
         }
+        if ($status === self::STATUS_REJECTED) {
+            return new \WP_Error(
+                'enovos_customer_rejected',
+                __('Your customer account was not approved. Please contact the shop if you think this is a mistake.', 'enovos-ticket-shop')
+            );
+        }
         return $user;
     }
 
@@ -136,10 +144,13 @@ final class CustomerApproval {
                 );
             }
         }
-        if (is_user_logged_in() && self::is_pending(get_current_user_id())) {
+        if (is_user_logged_in() && self::is_blocked(get_current_user_id())) {
+            $status = (string) get_user_meta(get_current_user_id(), self::STATUS_META, true);
             wp_logout();
             wc_add_notice(
-                __('Your customer account must be approved before you can sign in or place an order.', 'enovos-ticket-shop'),
+                $status === self::STATUS_REJECTED
+                    ? __('Your customer account was not approved. Please contact the shop if you think this is a mistake.', 'enovos-ticket-shop')
+                    : __('Your customer account must be approved before you can sign in or place an order.', 'enovos-ticket-shop'),
                 'error'
             );
             wp_safe_redirect(self::my_account_url());
@@ -154,7 +165,7 @@ final class CustomerApproval {
         if (!self::enabled()) {
             return;
         }
-        if (is_user_logged_in() && self::is_pending(get_current_user_id())) {
+        if (is_user_logged_in() && self::is_blocked(get_current_user_id())) {
             $errors->add(
                 'enovos_customer_pending',
                 __('Your customer account must be approved before you can place an order.', 'enovos-ticket-shop')
@@ -180,7 +191,7 @@ final class CustomerApproval {
         if (!preg_match('#^/wc/store(?:/v\d+)?/checkout/?$#', $request->get_route())) {
             return $result;
         }
-        if (is_user_logged_in() && self::is_pending(get_current_user_id())) {
+        if (is_user_logged_in() && self::is_blocked(get_current_user_id())) {
             return new \WP_Error(
                 'enovos_customer_pending',
                 __('Your customer account must be approved before you can place an order.', 'enovos-ticket-shop'),
@@ -256,6 +267,21 @@ final class CustomerApproval {
         return true;
     }
 
+    public static function reject(int $user_id): bool {
+        if (get_user_meta($user_id, self::STATUS_META, true) !== self::STATUS_PENDING_ADMIN) {
+            return false;
+        }
+        update_user_meta($user_id, self::STATUS_META, self::STATUS_REJECTED);
+        update_user_meta($user_id, self::REJECTED_AT_META, current_time('mysql', true));
+        self::trigger_email(EmailCustomerRejected::class, $user_id);
+        Logger::log('STEP', 'Customer account rejected', [
+            'user_id' => $user_id,
+            'domain' => (string) get_user_meta($user_id, self::DOMAIN_META, true),
+            'status' => self::STATUS_REJECTED,
+        ]);
+        return true;
+    }
+
     public static function admin_recipients(): string {
         $settings = Plugin::settings();
         $recipients = self::sanitize_recipient_list((string) ($settings['approval_admin_recipients'] ?? ''));
@@ -323,7 +349,12 @@ final class CustomerApproval {
             $new_status = self::STATUS_APPROVED;
         } else {
             update_user_meta($user_id, self::STATUS_META, self::STATUS_PENDING_ADMIN);
-            self::trigger_email(EmailAdminApproval::class, $user_id, CustomerApprovalAdmin::approval_page_url($user_id));
+            self::trigger_email(
+                EmailAdminApproval::class,
+                $user_id,
+                CustomerApprovalAdmin::decision_page_url($user_id, 'approve'),
+                CustomerApprovalAdmin::decision_page_url($user_id, 'reject')
+            );
             $new_status = self::STATUS_PENDING_ADMIN;
         }
 
@@ -369,10 +400,10 @@ final class CustomerApproval {
         return in_array(strtolower($domain), preg_split('/\R/', $whitelist) ?: [], true);
     }
 
-    private static function is_pending(int $user_id): bool {
+    private static function is_blocked(int $user_id): bool {
         return in_array(
             (string) get_user_meta($user_id, self::STATUS_META, true),
-            [self::STATUS_PENDING_EMAIL, self::STATUS_PENDING_ADMIN],
+            [self::STATUS_PENDING_EMAIL, self::STATUS_PENDING_ADMIN, self::STATUS_REJECTED],
             true
         );
     }

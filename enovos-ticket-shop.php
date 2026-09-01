@@ -27,6 +27,7 @@ if (is_readable($enovos_ticket_shop_autoload)) {
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-logger.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-customer-approval.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-customer-approval-admin.php';
+require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-email-template-editor.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-shop.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-pdf.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-pdf-text.php';
