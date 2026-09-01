@@ -64,6 +64,45 @@
   margin-bottom: 20px;
 }
 
+.enovos-settings-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 12px;
+  padding-top: 18px;
+  border-top: 1px solid #dcdcde;
+}
+
+.enovos-settings-tab {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  color: #50575e;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.enovos-settings-tab:hover,
+.enovos-settings-tab:focus {
+  color: #1d2327;
+  background: #e2e4e7;
+}
+
+.enovos-settings-tab:focus {
+  box-shadow: 0 0 0 2px #2271b1;
+  outline: 2px solid transparent;
+}
+
+.enovos-settings-tab.is-active,
+.enovos-settings-tab.is-active:hover,
+.enovos-settings-tab.is-active:focus {
+  color: #fff;
+  background: #1d2327;
+}
+
 .enovos-card {
   background: #fff;
   border: 1px solid #dcdcde;
@@ -201,10 +240,12 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 14px 0 4px;
-  position: sticky;
-  bottom: 0;
-  background: linear-gradient(180deg, rgba(240, 240, 241, 0), #f0f0f1 28%);
+  margin-top: 12px;
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #dcdcde;
+  border-radius: 8px;
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.04);
 }
 
 .enovos-inline-form {
@@ -307,6 +348,20 @@
 }
 
 @media (max-width: 782px) {
+  .enovos-settings-tabs {
+    gap: 4px;
+  }
+
+  .enovos-settings-tab {
+    min-height: 40px;
+    padding: 0 12px;
+  }
+
+  .enovos-actions-bar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
   .enovos-card .form-table th,
   .enovos-card .form-table td {
     display: block;

@@ -24,7 +24,7 @@ WordPress / WooCommerce plugin for importing concert ticket PDFs into products a
 
 ## AI provider
 
-Choose exactly one provider in **Enovos Tickets > Settings**:
+Choose exactly one provider in **Enovos Tickets > Settings > Ticket Shop**:
 
 - OpenAI
 - Gemini
@@ -44,7 +44,7 @@ An administrator can enter or replace the price manually. A positive reviewed pr
 
 ## Settings toggles
 
-Under **Enovos Tickets > Settings** you can also enable/disable:
+Under **Enovos Tickets > Settings > Ticket Shop** you can also enable/disable:
 
 - Publish products immediately (otherwise drafts)
 - Attach Me! sync when the plugin is available
@@ -79,12 +79,12 @@ Dependencies are shipped under `vendor/` (`setasign/fpdf`, `setasign/fpdi`). Aft
 New WooCommerce customer accounts use a two-step approval flow:
 
 1. Every new customer receives an email verification link that is valid for 48 hours.
-2. After verification, exact email domains listed under **Enovos Tickets > Settings > Customer approval** are approved automatically.
+2. After verification, exact email domains listed under **Enovos Tickets > Settings > Customer Approval** are approved automatically.
 3. Verified customers from all other domains remain blocked until a user with the `manage_woocommerce` capability approves them.
 
 Pending accounts cannot sign in or check out. Existing users without an Enovos approval status are unaffected.
 
-Manage waiting accounts under **Enovos Tickets > Pending Customers**. Administrators can review and approve verified customers or resend a verification message to customers who have not confirmed their email. Approval links in administrator emails always require a WordPress login and a separate confirmation click.
+Manage waiting accounts under **WooCommerce > Pending Customers**. Administrators can review and approve verified customers or resend a verification message to customers who have not confirmed their email. Approval links in administrator emails always require a WordPress login and a separate confirmation click.
 
 Enter one exact domain per line in the whitelist without `@`. A domain does not include its subdomains: for example, `company.com` does not match `shop.company.com`. Approval notification recipients are configurable; when left empty, the WordPress administration email is used.
 

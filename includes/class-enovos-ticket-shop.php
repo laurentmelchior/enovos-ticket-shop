@@ -122,9 +122,9 @@ final class Plugin {
     public function admin_menu(): void {
         add_menu_page('Enovos Ticket Shop', 'Enovos Tickets', 'manage_woocommerce', 'enovos-ticket-shop', [$this, 'render_dashboard'], 'dashicons-tickets-alt', 56);
         add_submenu_page('enovos-ticket-shop', 'Ticket Inventory', 'Ticket Inventory', 'manage_woocommerce', 'enovos-ticket-inventory', [$this, 'render_inventory']);
-        add_submenu_page('enovos-ticket-shop', 'Pending Customers', 'Pending Customers', 'manage_woocommerce', 'enovos-pending-customers', [CustomerApprovalAdmin::class, 'render']);
         add_submenu_page('enovos-ticket-shop', 'Settings', 'Settings', 'manage_woocommerce', 'enovos-ticket-shop-settings', [$this, 'render_settings']);
         add_submenu_page('enovos-ticket-shop', 'Changelog', 'Changelog', 'manage_woocommerce', 'enovos-ticket-shop-changelog', [$this, 'render_changelog']);
+        add_submenu_page('woocommerce', 'Pending Customers', 'Pending Customers', 'manage_woocommerce', 'enovos-pending-customers', [CustomerApprovalAdmin::class, 'render']);
     }
 
     public function register_settings(): void {
@@ -136,6 +136,14 @@ final class Plugin {
 
     public function sanitize_settings(array $input): array {
         $d = self::defaults();
+        $settings = self::settings();
+        $section = sanitize_key($input['_settings_section'] ?? 'ticket-shop');
+        if ($section === 'customer-approval') {
+            $settings['enable_customer_approval'] = !empty($input['enable_customer_approval']) ? 1 : 0;
+            $settings['approval_domain_whitelist'] = CustomerApproval::sanitize_domains(wp_unslash((string) ($input['approval_domain_whitelist'] ?? '')));
+            $settings['approval_admin_recipients'] = CustomerApproval::sanitize_recipient_list(wp_unslash((string) ($input['approval_admin_recipients'] ?? '')));
+            return $settings;
+        }
         $provider = sanitize_key($input['ai_provider'] ?? $d['ai_provider']);
         if (!in_array($provider, ['openai', 'gemini', 'custom'], true)) {
             $provider = 'openai';
@@ -151,31 +159,27 @@ final class Plugin {
         $bool = static function (array $input, string $key): int {
             return !empty($input[$key]) ? 1 : 0;
         };
-        return [
-            'ai_provider' => $provider,
-            'openai_api_key' => sanitize_text_field($input['openai_api_key'] ?? ''),
-            'openai_model' => sanitize_text_field($input['openai_model'] ?? $d['openai_model']),
-            'gemini_api_key' => sanitize_text_field($input['gemini_api_key'] ?? ''),
-            'gemini_model' => sanitize_text_field($input['gemini_model'] ?? $d['gemini_model']),
-            'custom_ai_endpoint' => esc_url_raw($input['custom_ai_endpoint'] ?? ''),
-            'custom_ai_token' => sanitize_text_field($input['custom_ai_token'] ?? ''),
-            'custom_ai_model' => sanitize_text_field($input['custom_ai_model'] ?? ''),
-            'custom_ai_auth_type' => $auth,
-            'custom_ai_auth_header' => sanitize_text_field($input['custom_ai_auth_header'] ?? 'X-API-Key'),
-            'publish_products' => $bool($input, 'publish_products'),
-            'delivery_order_status' => $delivery,
-            'admin_page_size' => max(10, min(500, (int) ($input['admin_page_size'] ?? $d['admin_page_size']))),
-            'show_debug_log' => $bool($input, 'show_debug_log'),
-            'show_last_import' => $bool($input, 'show_last_import'),
-            'enable_debug_logging' => $bool($input, 'enable_debug_logging'),
-            'enable_attach_me' => $bool($input, 'enable_attach_me'),
-            'enable_native_email_attach' => $bool($input, 'enable_native_email_attach'),
-            'enable_atelier_enrichment' => $bool($input, 'enable_atelier_enrichment'),
-            'auto_select_ready_events' => $bool($input, 'auto_select_ready_events'),
-            'enable_customer_approval' => $bool($input, 'enable_customer_approval'),
-            'approval_domain_whitelist' => CustomerApproval::sanitize_domains(wp_unslash((string) ($input['approval_domain_whitelist'] ?? ''))),
-            'approval_admin_recipients' => CustomerApproval::sanitize_recipient_list(wp_unslash((string) ($input['approval_admin_recipients'] ?? ''))),
-        ];
+        $settings['ai_provider'] = $provider;
+        $settings['openai_api_key'] = sanitize_text_field($input['openai_api_key'] ?? '');
+        $settings['openai_model'] = sanitize_text_field($input['openai_model'] ?? $d['openai_model']);
+        $settings['gemini_api_key'] = sanitize_text_field($input['gemini_api_key'] ?? '');
+        $settings['gemini_model'] = sanitize_text_field($input['gemini_model'] ?? $d['gemini_model']);
+        $settings['custom_ai_endpoint'] = esc_url_raw($input['custom_ai_endpoint'] ?? '');
+        $settings['custom_ai_token'] = sanitize_text_field($input['custom_ai_token'] ?? '');
+        $settings['custom_ai_model'] = sanitize_text_field($input['custom_ai_model'] ?? '');
+        $settings['custom_ai_auth_type'] = $auth;
+        $settings['custom_ai_auth_header'] = sanitize_text_field($input['custom_ai_auth_header'] ?? 'X-API-Key');
+        $settings['publish_products'] = $bool($input, 'publish_products');
+        $settings['delivery_order_status'] = $delivery;
+        $settings['admin_page_size'] = max(10, min(500, (int) ($input['admin_page_size'] ?? $d['admin_page_size'])));
+        $settings['show_debug_log'] = $bool($input, 'show_debug_log');
+        $settings['show_last_import'] = $bool($input, 'show_last_import');
+        $settings['enable_debug_logging'] = $bool($input, 'enable_debug_logging');
+        $settings['enable_attach_me'] = $bool($input, 'enable_attach_me');
+        $settings['enable_native_email_attach'] = $bool($input, 'enable_native_email_attach');
+        $settings['enable_atelier_enrichment'] = $bool($input, 'enable_atelier_enrichment');
+        $settings['auto_select_ready_events'] = $bool($input, 'auto_select_ready_events');
+        return $settings;
     }
 
     public function register_customer_approval_emails(array $emails): array {
@@ -500,68 +504,80 @@ final class Plugin {
             return;
         }
         $s = self::settings();
+        $section = sanitize_key((string) ($_GET['section'] ?? 'ticket-shop'));
+        if (!in_array($section, ['ticket-shop', 'customer-approval'], true)) {
+            $section = 'ticket-shop';
+        }
+        $base_url = admin_url('admin.php?page=enovos-ticket-shop-settings');
         echo '<div class="wrap enovos-admin"><h1>Settings</h1>';
-        echo '<p class="enovos-admin-lead">Configure the AI provider, product delivery behaviour, and which Enovos Tickets admin sections are visible.</p>';
+        settings_errors();
+        echo '<p class="enovos-admin-lead">' . ($section === 'customer-approval'
+            ? 'Configure email verification, automatic domain approval, and administrator notifications.'
+            : 'Configure ticket imports, AI providers, product delivery, and the Enovos Tickets dashboard.') . '</p>';
+        echo '<nav class="enovos-settings-tabs" aria-label="Settings sections">';
+        foreach (['ticket-shop' => 'Ticket Shop', 'customer-approval' => 'Customer Approval'] as $tab => $label) {
+            $active = $section === $tab;
+            echo '<a class="enovos-settings-tab' . ($active ? ' is-active' : '') . '" href="' . esc_url(add_query_arg('section', $tab, $base_url)) . '"' . ($active ? ' aria-current="page"' : '') . '>' . esc_html($label) . '</a>';
+        }
+        echo '</nav>';
         echo '<form method="post" action="options.php">';
         settings_fields('enovos_ticket_shop_settings_group');
+        echo '<input type="hidden" name="enovos_ticket_shop_settings[_settings_section]" value="' . esc_attr($section) . '">';
         echo '<div class="enovos-settings-grid">';
 
-        // AI provider
-        echo '<div class="enovos-card"><div class="enovos-card__header"><h2>AI provider</h2><p>Only the selected provider is used for PDF analysis, Atelier enrichment and price verification.</p></div><div class="enovos-card__body">';
-        echo '<table class="form-table" role="presentation"><tr><th><label for="enovos_ai_provider">Provider</label></th><td><select id="enovos_ai_provider" name="enovos_ticket_shop_settings[ai_provider]">';
-        foreach (['openai' => 'OpenAI', 'gemini' => 'Gemini', 'custom' => 'Custom AI'] as $value => $label) {
-            echo '<option value="' . esc_attr($value) . '" ' . selected($s['ai_provider'], $value, false) . '>' . esc_html($label) . '</option>';
+        if ($section === 'ticket-shop') {
+            echo '<div class="enovos-card"><div class="enovos-card__header"><h2>AI provider</h2><p>Only the selected provider is used for PDF analysis, Atelier enrichment and price verification.</p></div><div class="enovos-card__body">';
+            echo '<table class="form-table" role="presentation"><tr><th><label for="enovos_ai_provider">Provider</label></th><td><select id="enovos_ai_provider" name="enovos_ticket_shop_settings[ai_provider]">';
+            foreach (['openai' => 'OpenAI', 'gemini' => 'Gemini', 'custom' => 'Custom AI'] as $value => $label) {
+                echo '<option value="' . esc_attr($value) . '" ' . selected($s['ai_provider'], $value, false) . '>' . esc_html($label) . '</option>';
+            }
+            echo '</select></td></tr></table>';
+
+            echo '<div class="enovos-provider-fields" data-enovos-provider="openai"><table class="form-table" role="presentation">';
+            $this->field('OpenAI API Key', 'openai_api_key', $s['openai_api_key'], 'password');
+            $this->field('OpenAI Model', 'openai_model', $s['openai_model']);
+            echo '</table></div>';
+
+            echo '<div class="enovos-provider-fields" data-enovos-provider="gemini" hidden><table class="form-table" role="presentation">';
+            $this->field('Gemini API Key', 'gemini_api_key', $s['gemini_api_key'], 'password');
+            $this->field('Gemini Model', 'gemini_model', $s['gemini_model']);
+            echo '</table></div>';
+
+            echo '<div class="enovos-provider-fields" data-enovos-provider="custom" hidden><table class="form-table" role="presentation">';
+            $this->field('Custom AI Endpoint', 'custom_ai_endpoint', $s['custom_ai_endpoint']);
+            $this->field('Custom AI Token / API Key', 'custom_ai_token', $s['custom_ai_token'], 'password');
+            $this->field('Custom AI Model', 'custom_ai_model', $s['custom_ai_model']);
+            echo '<tr><th>Authentication</th><td><select name="enovos_ticket_shop_settings[custom_ai_auth_type]"><option value="bearer" ' . selected($s['custom_ai_auth_type'], 'bearer', false) . '>Bearer token</option><option value="api_key_header" ' . selected($s['custom_ai_auth_type'], 'api_key_header', false) . '>API key header</option><option value="none" ' . selected($s['custom_ai_auth_type'], 'none', false) . '>None</option></select></td></tr>';
+            $this->field('API Key Header name', 'custom_ai_auth_header', $s['custom_ai_auth_header']);
+            echo '</table></div></div></div>';
+
+            echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Products &amp; delivery</h2><p>How imported products are published and when ticket PDFs leave with the customer email.</p></div><div class="enovos-card__body">';
+            echo '<table class="form-table" role="presentation">';
+            echo '<tr><th>Ticket delivery status</th><td><select name="enovos_ticket_shop_settings[delivery_order_status]"><option value="completed" ' . selected($s['delivery_order_status'], 'completed', false) . '>Completed</option><option value="processing" ' . selected($s['delivery_order_status'], 'processing', false) . '>Processing</option></select><p class="description">Ticket PDFs are sent only with this customer order email.</p></td></tr>';
+            echo '<tr><th>Admin list size</th><td><input class="small-text" type="number" min="10" max="500" name="enovos_ticket_shop_settings[admin_page_size]" value="' . esc_attr((string) $s['admin_page_size']) . '"> <span class="description">Rows shown in Ticket Inventory and lines in the debug log view.</span></td></tr>';
+            echo '</table><ul class="enovos-toggle-list">';
+            $this->toggle('publish_products', (int) $s['publish_products'], 'Publish products immediately', 'When off, imported concerts stay as drafts until you publish them.');
+            $this->toggle('enable_attach_me', (int) $s['enable_attach_me'], 'Use Attach Me! when available', 'Register reserved ticket PDFs on the WooCommerce order Attachments box.');
+            $this->toggle('enable_native_email_attach', (int) $s['enable_native_email_attach'], 'Native email PDF attachment', 'Attach ticket PDFs directly to the WooCommerce customer email when Attach Me! is not used.');
+            $this->toggle('enable_atelier_enrichment', (int) $s['enable_atelier_enrichment'], 'Atelier enrichment', 'Fetch artist/group image and extra Atelier page data during PDF analysis.');
+            echo '</ul></div></div>';
+
+            echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Enovos Tickets dashboard</h2><p>Show or hide sections on the main Enovos Tickets page.</p></div><div class="enovos-card__body"><ul class="enovos-toggle-list">';
+            $this->toggle('show_debug_log', (int) $s['show_debug_log'], 'Import / Debug Log', 'Show the processing log panel on the Enovos Tickets dashboard.');
+            $this->toggle('show_last_import', (int) $s['show_last_import'], 'Last import result', 'Show the last import summary table on the dashboard.');
+            $this->toggle('enable_debug_logging', (int) $s['enable_debug_logging'], 'Write debug log entries', 'When off, no new log lines are written (existing log stays until cleared).');
+            $this->toggle('auto_select_ready_events', (int) $s['auto_select_ready_events'], 'Auto-select ready concerts', 'Pre-check concerts that are ready for import in the import check table.');
+            echo '</ul></div></div>';
+        } else {
+            echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Customer approval</h2><p>Require new WooCommerce customers to verify their email address and manually review domains outside the whitelist.</p></div><div class="enovos-card__body">';
+            echo '<ul class="enovos-toggle-list">';
+            $this->toggle('enable_customer_approval', (int) $s['enable_customer_approval'], 'Enable customer approval', 'Existing users are unaffected. New customers cannot sign in or check out until approved.');
+            echo '</ul><table class="form-table" role="presentation">';
+            echo '<tr><th><label for="approval_domain_whitelist">Domain whitelist</label></th><td><textarea class="large-text code" rows="6" id="approval_domain_whitelist" name="enovos_ticket_shop_settings[approval_domain_whitelist]" placeholder="company.com&#10;partner.lu">' . esc_textarea((string) $s['approval_domain_whitelist']) . '</textarea><p class="description">Enter one exact domain per line, without @. Subdomains must be listed separately. Customers from these domains are approved automatically after email verification.</p></td></tr>';
+            echo '<tr><th><label for="approval_admin_recipients">Approval recipients</label></th><td><input class="large-text" type="text" id="approval_admin_recipients" name="enovos_ticket_shop_settings[approval_admin_recipients]" value="' . esc_attr((string) $s['approval_admin_recipients']) . '" placeholder="shop@example.com, manager@example.com"><p class="description">Comma-separated email addresses notified when manual approval is required. The WordPress administration email is used when empty.</p></td></tr>';
+            echo '</table><p><a class="button" href="' . esc_url(admin_url('admin.php?page=wc-settings&tab=email')) . '">Edit approval emails in WooCommerce</a></p>';
+            echo '</div></div>';
         }
-        echo '</select></td></tr></table>';
-
-        echo '<div class="enovos-provider-fields" data-enovos-provider="openai"><table class="form-table" role="presentation">';
-        $this->field('OpenAI API Key', 'openai_api_key', $s['openai_api_key'], 'password');
-        $this->field('OpenAI Model', 'openai_model', $s['openai_model']);
-        echo '</table></div>';
-
-        echo '<div class="enovos-provider-fields" data-enovos-provider="gemini" hidden><table class="form-table" role="presentation">';
-        $this->field('Gemini API Key', 'gemini_api_key', $s['gemini_api_key'], 'password');
-        $this->field('Gemini Model', 'gemini_model', $s['gemini_model']);
-        echo '</table></div>';
-
-        echo '<div class="enovos-provider-fields" data-enovos-provider="custom" hidden><table class="form-table" role="presentation">';
-        $this->field('Custom AI Endpoint', 'custom_ai_endpoint', $s['custom_ai_endpoint']);
-        $this->field('Custom AI Token / API Key', 'custom_ai_token', $s['custom_ai_token'], 'password');
-        $this->field('Custom AI Model', 'custom_ai_model', $s['custom_ai_model']);
-        echo '<tr><th>Authentication</th><td><select name="enovos_ticket_shop_settings[custom_ai_auth_type]"><option value="bearer" ' . selected($s['custom_ai_auth_type'], 'bearer', false) . '>Bearer token</option><option value="api_key_header" ' . selected($s['custom_ai_auth_type'], 'api_key_header', false) . '>API key header</option><option value="none" ' . selected($s['custom_ai_auth_type'], 'none', false) . '>None</option></select></td></tr>';
-        $this->field('API Key Header name', 'custom_ai_auth_header', $s['custom_ai_auth_header']);
-        echo '</table></div></div></div>';
-
-        // Product & delivery
-        echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Products &amp; delivery</h2><p>How imported products are published and when ticket PDFs leave with the customer email.</p></div><div class="enovos-card__body">';
-        echo '<table class="form-table" role="presentation">';
-        echo '<tr><th>Ticket delivery status</th><td><select name="enovos_ticket_shop_settings[delivery_order_status]"><option value="completed" ' . selected($s['delivery_order_status'], 'completed', false) . '>Completed</option><option value="processing" ' . selected($s['delivery_order_status'], 'processing', false) . '>Processing</option></select><p class="description">Ticket PDFs are sent only with this customer order email.</p></td></tr>';
-        echo '<tr><th>Admin list size</th><td><input class="small-text" type="number" min="10" max="500" name="enovos_ticket_shop_settings[admin_page_size]" value="' . esc_attr((string) $s['admin_page_size']) . '"> <span class="description">Rows shown in Ticket Inventory and lines in the debug log view.</span></td></tr>';
-        echo '</table>';
-        echo '<ul class="enovos-toggle-list">';
-        $this->toggle('publish_products', (int) $s['publish_products'], 'Publish products immediately', 'When off, imported concerts stay as drafts until you publish them.');
-        $this->toggle('enable_attach_me', (int) $s['enable_attach_me'], 'Use Attach Me! when available', 'Register reserved ticket PDFs on the WooCommerce order Attachments box.');
-        $this->toggle('enable_native_email_attach', (int) $s['enable_native_email_attach'], 'Native email PDF attachment', 'Attach ticket PDFs directly to the WooCommerce customer email when Attach Me! is not used.');
-        $this->toggle('enable_atelier_enrichment', (int) $s['enable_atelier_enrichment'], 'Atelier enrichment', 'Fetch artist/group image and extra Atelier page data during PDF analysis.');
-        echo '</ul></div></div>';
-
-        // Customer approval
-        echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Customer approval</h2><p>Require new WooCommerce customers to verify their email address and manually review domains outside the whitelist.</p></div><div class="enovos-card__body">';
-        echo '<ul class="enovos-toggle-list">';
-        $this->toggle('enable_customer_approval', (int) $s['enable_customer_approval'], 'Enable customer approval', 'Existing users are unaffected. New customers cannot sign in or check out until approved.');
-        echo '</ul><table class="form-table" role="presentation">';
-        echo '<tr><th><label for="approval_domain_whitelist">Domain whitelist</label></th><td><textarea class="large-text code" rows="6" id="approval_domain_whitelist" name="enovos_ticket_shop_settings[approval_domain_whitelist]" placeholder="company.com&#10;partner.lu">' . esc_textarea((string) $s['approval_domain_whitelist']) . '</textarea><p class="description">Enter one exact domain per line, without @. Subdomains must be listed separately. Customers from these domains are approved automatically after email verification.</p></td></tr>';
-        echo '<tr><th><label for="approval_admin_recipients">Approval recipients</label></th><td><input class="large-text" type="text" id="approval_admin_recipients" name="enovos_ticket_shop_settings[approval_admin_recipients]" value="' . esc_attr((string) $s['approval_admin_recipients']) . '" placeholder="shop@example.com, manager@example.com"><p class="description">Comma-separated email addresses notified when manual approval is required. The WordPress administration email is used when empty.</p></td></tr>';
-        echo '</table><p><a href="' . esc_url(admin_url('admin.php?page=wc-settings&tab=email')) . '">Edit the three customer approval emails in WooCommerce email settings.</a></p>';
-        echo '</div></div>';
-
-        // Admin UI toggles
-        echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Enovos Tickets dashboard</h2><p>Show or hide sections on the main Enovos Tickets page.</p></div><div class="enovos-card__body"><ul class="enovos-toggle-list">';
-        $this->toggle('show_debug_log', (int) $s['show_debug_log'], 'Import / Debug Log', 'Show the processing log panel on the Enovos Tickets dashboard.');
-        $this->toggle('show_last_import', (int) $s['show_last_import'], 'Last import result', 'Show the last import summary table on the dashboard.');
-        $this->toggle('enable_debug_logging', (int) $s['enable_debug_logging'], 'Write debug log entries', 'When off, no new log lines are written (existing log stays until cleared).');
-        $this->toggle('auto_select_ready_events', (int) $s['auto_select_ready_events'], 'Auto-select ready concerts', 'Pre-check concerts that are ready for import in the import check table.');
-        echo '</ul></div></div>';
 
         echo '</div><div class="enovos-actions-bar"><button class="button button-primary button-large">Save settings</button>';
         echo '<a class="button button-secondary" href="' . esc_url(admin_url('admin.php?page=enovos-ticket-shop')) . '">Back to Enovos Tickets</a></div>';

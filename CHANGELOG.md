@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 0.4.1 – 2026-09-01
+- Split Enovos settings into readable Ticket Shop and Customer Approval tabs.
+- Preserved settings from the inactive tab when either section is saved.
+- Moved Pending Customers from Enovos Tickets to the WooCommerce menu.
+
 ## Version 0.4.0 – 2026-09-01
 - Added mandatory email verification for newly registered WooCommerce customers.
 - Added exact-match domain whitelisting for automatic approval after email verification.
