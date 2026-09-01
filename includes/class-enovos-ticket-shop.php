@@ -35,6 +35,9 @@ final class Plugin {
             'enable_native_email_attach' => 1,
             'enable_atelier_enrichment' => 1,
             'auto_select_ready_events' => 1,
+            'enable_customer_approval' => 1,
+            'approval_domain_whitelist' => '',
+            'approval_admin_recipients' => '',
         ];
     }
 
@@ -57,6 +60,7 @@ final class Plugin {
         add_action('admin_post_enovos_ticket_clear_log', [$this, 'handle_clear_log']);
         add_action('admin_post_enovos_ticket_delete_packages', [$this, 'handle_delete_packages']);
         add_action('admin_post_enovos_ticket_download_package', [$this, 'handle_download_package']);
+        add_filter('woocommerce_email_classes', [$this, 'register_customer_approval_emails']);
 
         add_action('woocommerce_checkout_order_created', [$this, 'reserve_order']);
         add_action('woocommerce_order_status_pending', [$this, 'reserve_order_by_id']);
@@ -68,6 +72,8 @@ final class Plugin {
         // Run late so Attach Me! / other attachment plugins can merge first.
         add_filter('woocommerce_email_attachments', [$this, 'email_attachments'], 999, 4);
         add_action('enovos_ticket_shop_sync_attach_me', ['\Enovos\TicketShop\AttachMe', 'handle_scheduled'], 10, 1);
+        CustomerApproval::init();
+        CustomerApprovalAdmin::init();
     }
 
     public function enqueue_admin_assets(string $hook): void {
@@ -75,6 +81,7 @@ final class Plugin {
         if (!in_array($page, [
             'enovos-ticket-shop',
             'enovos-ticket-inventory',
+            'enovos-pending-customers',
             'enovos-ticket-shop-settings',
             'enovos-ticket-shop-changelog',
         ], true)) {
@@ -115,6 +122,7 @@ final class Plugin {
     public function admin_menu(): void {
         add_menu_page('Enovos Ticket Shop', 'Enovos Tickets', 'manage_woocommerce', 'enovos-ticket-shop', [$this, 'render_dashboard'], 'dashicons-tickets-alt', 56);
         add_submenu_page('enovos-ticket-shop', 'Ticket Inventory', 'Ticket Inventory', 'manage_woocommerce', 'enovos-ticket-inventory', [$this, 'render_inventory']);
+        add_submenu_page('enovos-ticket-shop', 'Pending Customers', 'Pending Customers', 'manage_woocommerce', 'enovos-pending-customers', [CustomerApprovalAdmin::class, 'render']);
         add_submenu_page('enovos-ticket-shop', 'Settings', 'Settings', 'manage_woocommerce', 'enovos-ticket-shop-settings', [$this, 'render_settings']);
         add_submenu_page('enovos-ticket-shop', 'Changelog', 'Changelog', 'manage_woocommerce', 'enovos-ticket-shop-changelog', [$this, 'render_changelog']);
     }
@@ -164,7 +172,17 @@ final class Plugin {
             'enable_native_email_attach' => $bool($input, 'enable_native_email_attach'),
             'enable_atelier_enrichment' => $bool($input, 'enable_atelier_enrichment'),
             'auto_select_ready_events' => $bool($input, 'auto_select_ready_events'),
+            'enable_customer_approval' => $bool($input, 'enable_customer_approval'),
+            'approval_domain_whitelist' => CustomerApproval::sanitize_domains(wp_unslash((string) ($input['approval_domain_whitelist'] ?? ''))),
+            'approval_admin_recipients' => CustomerApproval::sanitize_recipient_list(wp_unslash((string) ($input['approval_admin_recipients'] ?? ''))),
         ];
+    }
+
+    public function register_customer_approval_emails(array $emails): array {
+        $emails['Enovos_Email_Customer_Verify'] = new EmailCustomerVerify();
+        $emails['Enovos_Email_Admin_Approval'] = new EmailAdminApproval();
+        $emails['Enovos_Email_Customer_Approved'] = new EmailCustomerApproved();
+        return $emails;
     }
 
     public function render_dashboard(): void {
@@ -523,6 +541,16 @@ final class Plugin {
         $this->toggle('enable_native_email_attach', (int) $s['enable_native_email_attach'], 'Native email PDF attachment', 'Attach ticket PDFs directly to the WooCommerce customer email when Attach Me! is not used.');
         $this->toggle('enable_atelier_enrichment', (int) $s['enable_atelier_enrichment'], 'Atelier enrichment', 'Fetch artist/group image and extra Atelier page data during PDF analysis.');
         echo '</ul></div></div>';
+
+        // Customer approval
+        echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Customer approval</h2><p>Require new WooCommerce customers to verify their email address and manually review domains outside the whitelist.</p></div><div class="enovos-card__body">';
+        echo '<ul class="enovos-toggle-list">';
+        $this->toggle('enable_customer_approval', (int) $s['enable_customer_approval'], 'Enable customer approval', 'Existing users are unaffected. New customers cannot sign in or check out until approved.');
+        echo '</ul><table class="form-table" role="presentation">';
+        echo '<tr><th><label for="approval_domain_whitelist">Domain whitelist</label></th><td><textarea class="large-text code" rows="6" id="approval_domain_whitelist" name="enovos_ticket_shop_settings[approval_domain_whitelist]" placeholder="company.com&#10;partner.lu">' . esc_textarea((string) $s['approval_domain_whitelist']) . '</textarea><p class="description">Enter one exact domain per line, without @. Subdomains must be listed separately. Customers from these domains are approved automatically after email verification.</p></td></tr>';
+        echo '<tr><th><label for="approval_admin_recipients">Approval recipients</label></th><td><input class="large-text" type="text" id="approval_admin_recipients" name="enovos_ticket_shop_settings[approval_admin_recipients]" value="' . esc_attr((string) $s['approval_admin_recipients']) . '" placeholder="shop@example.com, manager@example.com"><p class="description">Comma-separated email addresses notified when manual approval is required. The WordPress administration email is used when empty.</p></td></tr>';
+        echo '</table><p><a href="' . esc_url(admin_url('admin.php?page=wc-settings&tab=email')) . '">Edit the three customer approval emails in WooCommerce email settings.</a></p>';
+        echo '</div></div>';
 
         // Admin UI toggles
         echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Enovos Tickets dashboard</h2><p>Show or hide sections on the main Enovos Tickets page.</p></div><div class="enovos-card__body"><ul class="enovos-toggle-list">';

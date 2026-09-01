@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Enovos Concert Ticket Shop Importer
  * Description: Imports concert ticket PDFs into WooCommerce products using OpenAI, Gemini and a configurable Custom AI provider, with Atelier enrichment and ACF mapping.
- * Version: 0.3.10
+ * Version: 0.4.0
  * Author: Enovos Digital Marketing / Bromance INC
  * Requires at least: 6.4
  * Requires PHP: 8.0
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('ENOVOS_TICKET_SHOP_VERSION', '0.3.10');
+define('ENOVOS_TICKET_SHOP_VERSION', '0.4.0');
 define('ENOVOS_TICKET_SHOP_FILE', __FILE__);
 define('ENOVOS_TICKET_SHOP_DIR', plugin_dir_path(__FILE__));
 define('ENOVOS_TICKET_SHOP_URL', plugin_dir_url(__FILE__));
@@ -25,6 +25,8 @@ if (is_readable($enovos_ticket_shop_autoload)) {
 }
 
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-logger.php';
+require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-customer-approval.php';
+require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-customer-approval-admin.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-shop.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-pdf.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-pdf-text.php';
@@ -45,6 +47,9 @@ add_action('plugins_loaded', static function () {
     if (!class_exists('WooCommerce')) {
         return;
     }
+    require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-customer-verify.php';
+    require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-admin-approval.php';
+    require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-customer-approved.php';
     \Enovos\TicketShop\Plugin::instance();
 });
 

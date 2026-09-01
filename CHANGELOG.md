@@ -1,5 +1,13 @@
 # Changelog
 
+## Version 0.4.0 – 2026-09-01
+- Added mandatory email verification for newly registered WooCommerce customers.
+- Added exact-match domain whitelisting for automatic approval after email verification.
+- Added manual administrator approval for verified customers outside the domain whitelist.
+- Added a Pending Customers admin page with secure review, approval and verification-resend actions.
+- Added editable WooCommerce emails for verification, administrator approval requests and customer approval confirmations.
+- Added 48-hour one-time verification links and rate-limited, enumeration-safe resending.
+
 ## Version 0.3.10 – 2026-08-31
 - Import/Debug Log and the changelog raw view now use black text on a light background.
 - Widened the ticket price input in the import check and right-aligned the amount.
