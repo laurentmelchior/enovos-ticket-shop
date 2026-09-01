@@ -10,13 +10,16 @@ final class CustomerApprovalAdmin {
 
     public static function init(): void {
         add_action('admin_post_enovos_approve_customer', [self::class, 'handle_approve']);
+        add_action('admin_post_enovos_reject_customer', [self::class, 'handle_reject']);
         add_action('admin_post_enovos_admin_resend_verification', [self::class, 'handle_resend']);
     }
 
-    public static function approval_page_url(int $user_id): string {
+    public static function decision_page_url(int $user_id, string $decision): string {
+        $decision = $decision === 'reject' ? 'reject' : 'approve';
         return add_query_arg([
             'page' => self::PAGE_SLUG,
-            'action' => 'confirm_approve',
+            'action' => 'confirm_decision',
+            'decision' => $decision,
             'user_id' => $user_id,
         ], admin_url('admin.php'));
     }
@@ -26,8 +29,8 @@ final class CustomerApprovalAdmin {
             wp_die(esc_html__('You are not allowed to manage customer approvals.', 'enovos-ticket-shop'));
         }
         $action = sanitize_key((string) ($_GET['action'] ?? ''));
-        if ($action === 'confirm_approve') {
-            self::render_confirmation();
+        if ($action === 'confirm_decision') {
+            self::render_decision();
             return;
         }
         self::render_list();
@@ -43,6 +46,21 @@ final class CustomerApprovalAdmin {
         wp_safe_redirect(add_query_arg(
             'enovos_approval_notice',
             $approved ? 'approved' : 'invalid',
+            admin_url('admin.php?page=' . self::PAGE_SLUG)
+        ));
+        exit;
+    }
+
+    public static function handle_reject(): void {
+        if (!current_user_can('manage_woocommerce')) {
+            wp_die(esc_html__('You are not allowed to reject customers.', 'enovos-ticket-shop'));
+        }
+        $user_id = absint($_POST['user_id'] ?? 0);
+        check_admin_referer('enovos_reject_customer_' . $user_id);
+        $rejected = CustomerApproval::reject($user_id);
+        wp_safe_redirect(add_query_arg(
+            'enovos_approval_notice',
+            $rejected ? 'rejected' : 'invalid',
             admin_url('admin.php?page=' . self::PAGE_SLUG)
         ));
         exit;
@@ -69,8 +87,12 @@ final class CustomerApprovalAdmin {
         exit;
     }
 
-    private static function render_confirmation(): void {
+    private static function render_decision(): void {
         $user_id = absint($_GET['user_id'] ?? 0);
+        $decision = sanitize_key((string) ($_GET['decision'] ?? ''));
+        if (!in_array($decision, ['approve', 'reject'], true)) {
+            wp_die(esc_html__('The approval action is invalid.', 'enovos-ticket-shop'));
+        }
         if (!$user_id) {
             wp_die(esc_html__('The approval link is invalid.', 'enovos-ticket-shop'));
         }
@@ -83,19 +105,25 @@ final class CustomerApprovalAdmin {
             return;
         }
 
-        echo '<div class="wrap enovos-admin"><h1>' . esc_html__('Approve customer', 'enovos-ticket-shop') . '</h1>';
-        echo '<div class="enovos-card"><div class="enovos-card__header"><h2>' . esc_html__('Confirm account approval', 'enovos-ticket-shop') . '</h2>';
-        echo '<p>' . esc_html__('Review the customer details before granting access to the shop.', 'enovos-ticket-shop') . '</p></div>';
+        $is_reject = $decision === 'reject';
+        $action = $is_reject ? 'enovos_reject_customer' : 'enovos_approve_customer';
+        $nonce_action = $action . '_' . $user_id;
+        $title = $is_reject ? __('Reject customer', 'enovos-ticket-shop') : __('Approve customer', 'enovos-ticket-shop');
+        echo '<div class="wrap enovos-admin"><h1>' . esc_html($title) . '</h1>';
+        echo '<div class="enovos-card"><div class="enovos-card__header"><h2>' . esc_html__('Confirm customer decision', 'enovos-ticket-shop') . '</h2>';
+        echo '<p>' . esc_html($is_reject
+            ? __('Review the customer details before rejecting access to the shop.', 'enovos-ticket-shop')
+            : __('Review the customer details before granting access to the shop.', 'enovos-ticket-shop')) . '</p></div>';
         echo '<div class="enovos-card__body"><table class="form-table" role="presentation">';
         echo '<tr><th>' . esc_html__('Customer', 'enovos-ticket-shop') . '</th><td>' . esc_html($user->display_name) . '</td></tr>';
         echo '<tr><th>' . esc_html__('Email', 'enovos-ticket-shop') . '</th><td>' . esc_html($user->user_email) . '</td></tr>';
         echo '<tr><th>' . esc_html__('Domain', 'enovos-ticket-shop') . '</th><td>' . esc_html((string) get_user_meta($user_id, '_enovos_email_domain', true)) . '</td></tr>';
         echo '</table>';
         echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
-        echo '<input type="hidden" name="action" value="enovos_approve_customer">';
+        echo '<input type="hidden" name="action" value="' . esc_attr($action) . '">';
         echo '<input type="hidden" name="user_id" value="' . esc_attr((string) $user_id) . '">';
-        wp_nonce_field('enovos_approve_customer_' . $user_id);
-        echo '<p><button type="submit" class="button button-primary">' . esc_html__('Approve customer', 'enovos-ticket-shop') . '</button> ';
+        wp_nonce_field($nonce_action);
+        echo '<p><button type="submit" class="button ' . ($is_reject ? 'button-secondary' : 'button-primary') . '">' . esc_html($title) . '</button> ';
         echo '<a class="button" href="' . esc_url(admin_url('admin.php?page=' . self::PAGE_SLUG)) . '">' . esc_html__('Cancel', 'enovos-ticket-shop') . '</a></p>';
         echo '</form></div></div></div>';
     }
@@ -148,7 +176,8 @@ final class CustomerApprovalAdmin {
             echo '<td>' . esc_html(mysql2date(get_option('date_format') . ' ' . get_option('time_format'), $user->user_registered)) . '</td>';
             echo '<td>';
             if ($status === CustomerApproval::STATUS_PENDING_ADMIN) {
-                echo '<a class="button button-primary" href="' . esc_url(self::approval_page_url($user->ID)) . '">' . esc_html__('Review and approve', 'enovos-ticket-shop') . '</a>';
+                self::render_decision_form($user->ID, 'approve', __('Approve', 'enovos-ticket-shop'), true);
+                self::render_decision_form($user->ID, 'reject', __('Reject', 'enovos-ticket-shop'), false);
             } else {
                 echo '<form class="enovos-inline-form" method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
                 echo '<input type="hidden" name="action" value="enovos_admin_resend_verification">';
@@ -167,6 +196,7 @@ final class CustomerApprovalAdmin {
         $notice = sanitize_key((string) ($_GET['enovos_approval_notice'] ?? ''));
         $messages = [
             'approved' => [__('Customer approved. The customer notification was sent.', 'enovos-ticket-shop'), 'success'],
+            'rejected' => [__('Customer rejected. The customer notification was sent.', 'enovos-ticket-shop'), 'success'],
             'resent' => [__('A new verification email was sent.', 'enovos-ticket-shop'), 'success'],
             'invalid' => [__('The requested action could not be completed because the customer status changed.', 'enovos-ticket-shop'), 'warning'],
         ];
@@ -175,6 +205,16 @@ final class CustomerApprovalAdmin {
         }
         [$message, $type] = $messages[$notice];
         echo '<div class="notice notice-' . esc_attr($type) . ' inline"><p>' . esc_html($message) . '</p></div>';
+    }
+
+    private static function render_decision_form(int $user_id, string $decision, string $label, bool $primary): void {
+        $action = $decision === 'reject' ? 'enovos_reject_customer' : 'enovos_approve_customer';
+        echo '<form class="enovos-inline-form" method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
+        echo '<input type="hidden" name="action" value="' . esc_attr($action) . '">';
+        echo '<input type="hidden" name="user_id" value="' . esc_attr((string) $user_id) . '">';
+        wp_nonce_field($action . '_' . $user_id);
+        echo '<button type="submit" class="button ' . ($primary ? 'button-primary' : 'button-secondary') . '">' . esc_html($label) . '</button>';
+        echo '</form>';
     }
 
     private static function render_pagination(int $page, int $per_page, int $total): void {

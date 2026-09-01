@@ -19,9 +19,10 @@ do_action('woocommerce_email_header', $email_heading, $email);
     </tr>
 </table>
 <p style="margin: 24px 0;">
-    <a class="button" href="<?php echo esc_url($approval_url); ?>"><?php esc_html_e('Review customer', 'enovos-ticket-shop'); ?></a>
+    <a class="button" href="<?php echo esc_url($approve_url); ?>"><?php esc_html_e('Approve', 'enovos-ticket-shop'); ?></a>
+    <a class="button" href="<?php echo esc_url($reject_url); ?>"><?php esc_html_e('Reject', 'enovos-ticket-shop'); ?></a>
 </p>
-<p><?php esc_html_e('You must sign in as a WooCommerce administrator and confirm the approval.', 'enovos-ticket-shop'); ?></p>
+<p><?php esc_html_e('You must sign in as a WooCommerce administrator and confirm the selected decision.', 'enovos-ticket-shop'); ?></p>
 <?php
 if ($additional_content) {
     echo wp_kses_post(wpautop(wptexturize($additional_content)));

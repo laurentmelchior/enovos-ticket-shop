@@ -74,6 +74,7 @@ final class Plugin {
         add_action('enovos_ticket_shop_sync_attach_me', ['\Enovos\TicketShop\AttachMe', 'handle_scheduled'], 10, 1);
         CustomerApproval::init();
         CustomerApprovalAdmin::init();
+        EmailTemplateEditor::init();
     }
 
     public function enqueue_admin_assets(string $hook): void {
@@ -186,9 +187,11 @@ final class Plugin {
         require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-customer-verify.php';
         require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-admin-approval.php';
         require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-customer-approved.php';
+        require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-customer-rejected.php';
         $emails['Enovos_Email_Customer_Verify'] = new EmailCustomerVerify();
         $emails['Enovos_Email_Admin_Approval'] = new EmailAdminApproval();
         $emails['Enovos_Email_Customer_Approved'] = new EmailCustomerApproved();
+        $emails['Enovos_Email_Customer_Rejected'] = new EmailCustomerRejected();
         return $emails;
     }
 
@@ -505,21 +508,31 @@ final class Plugin {
         }
         $s = self::settings();
         $section = sanitize_key((string) ($_GET['section'] ?? 'ticket-shop'));
-        if (!in_array($section, ['ticket-shop', 'customer-approval'], true)) {
+        if (!in_array($section, ['ticket-shop', 'customer-approval', 'email-templates'], true)) {
             $section = 'ticket-shop';
         }
         $base_url = admin_url('admin.php?page=enovos-ticket-shop-settings');
         echo '<div class="wrap enovos-admin"><h1>Settings</h1>';
         settings_errors();
-        echo '<p class="enovos-admin-lead">' . ($section === 'customer-approval'
-            ? 'Configure email verification, automatic domain approval, and administrator notifications.'
-            : 'Configure ticket imports, AI providers, product delivery, and the Enovos Tickets dashboard.') . '</p>';
+        $section_descriptions = [
+            'ticket-shop' => 'Configure ticket imports, AI providers, product delivery, and the Enovos Tickets dashboard.',
+            'customer-approval' => 'Configure email verification, automatic domain approval, and administrator notifications.',
+            'email-templates' => 'Paste Beefree HTML and manage placeholders for every registered WooCommerce email.',
+        ];
+        echo '<p class="enovos-admin-lead">' . esc_html($section_descriptions[$section]) . '</p>';
         echo '<nav class="enovos-settings-tabs" aria-label="Settings sections">';
-        foreach (['ticket-shop' => 'Ticket Shop', 'customer-approval' => 'Customer Approval'] as $tab => $label) {
+        foreach (['ticket-shop' => 'Ticket Shop', 'customer-approval' => 'Customer Approval', 'email-templates' => 'Email Templates'] as $tab => $label) {
             $active = $section === $tab;
             echo '<a class="enovos-settings-tab' . ($active ? ' is-active' : '') . '" href="' . esc_url(add_query_arg('section', $tab, $base_url)) . '"' . ($active ? ' aria-current="page"' : '') . '>' . esc_html($label) . '</a>';
         }
         echo '</nav>';
+        if ($section === 'email-templates') {
+            EmailTemplateEditor::render_notice();
+            echo '<div class="enovos-settings-grid">';
+            EmailTemplateEditor::render_settings();
+            echo '</div><div class="enovos-actions-bar"><a class="button button-secondary" href="' . esc_url(admin_url('admin.php?page=enovos-ticket-shop')) . '">Back to Enovos Tickets</a></div></div>';
+            return;
+        }
         echo '<form method="post" action="options.php">';
         settings_fields('enovos_ticket_shop_settings_group');
         echo '<input type="hidden" name="enovos_ticket_shop_settings[_settings_section]" value="' . esc_attr($section) . '">';
