@@ -6,6 +6,7 @@
 - Added scanner-safe Approve and Reject links to administrator approval emails; decisions still require an authenticated confirmation.
 - Added optional Beefree HTML overrides for every registered WooCommerce email.
 - Added an Email Templates settings tab with per-email HTML, native and Enovos placeholders, and order-detail tokens.
+- Replaced the verification resend form inside the login form with a Lost Password-style link and a dedicated resend page.
 
 ## Version 0.4.1 – 2026-09-01
 - Split Enovos settings into readable Ticket Shop and Customer Approval tabs.
