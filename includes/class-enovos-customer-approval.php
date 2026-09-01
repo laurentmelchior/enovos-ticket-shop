@@ -116,6 +116,25 @@ final class CustomerApproval {
                 'success'
             );
         }
+        if (isset($_GET['enovos_verified'])) {
+            $verification_result = sanitize_key((string) $_GET['enovos_verified']);
+            if ($verification_result === 'approved') {
+                wc_add_notice(
+                    __('Your email address is confirmed and your account is now active. You can sign in.', 'enovos-ticket-shop'),
+                    'success'
+                );
+            } elseif ($verification_result === 'pending_admin') {
+                wc_add_notice(
+                    __('Your email address is confirmed. An administrator will review your account.', 'enovos-ticket-shop'),
+                    'success'
+                );
+            } elseif ($verification_result === 'invalid') {
+                wc_add_notice(
+                    __('This verification link is invalid or has expired. Please request a new link.', 'enovos-ticket-shop'),
+                    'error'
+                );
+            }
+        }
         if (is_user_logged_in() && self::is_pending(get_current_user_id())) {
             wp_logout();
             wc_add_notice(
@@ -286,11 +305,7 @@ final class CustomerApproval {
             && hash_equals($expected_hash, hash('sha256', $token));
 
         if (!$valid) {
-            wc_add_notice(
-                __('This verification link is invalid or has expired. Please request a new link.', 'enovos-ticket-shop'),
-                'error'
-            );
-            wp_safe_redirect(self::my_account_url());
+            wp_safe_redirect(add_query_arg('enovos_verified', 'invalid', self::my_account_url()));
             exit;
         }
 
@@ -304,12 +319,10 @@ final class CustomerApproval {
         if ($whitelisted) {
             update_user_meta($user_id, self::STATUS_META, self::STATUS_APPROVED);
             update_user_meta($user_id, self::APPROVED_AT_META, current_time('mysql', true));
-            $notice = __('Your email address is confirmed and your account is now active. You can sign in.', 'enovos-ticket-shop');
             $new_status = self::STATUS_APPROVED;
         } else {
             update_user_meta($user_id, self::STATUS_META, self::STATUS_PENDING_ADMIN);
             self::trigger_email(EmailAdminApproval::class, $user_id, CustomerApprovalAdmin::approval_page_url($user_id));
-            $notice = __('Your email address is confirmed. An administrator will review your account.', 'enovos-ticket-shop');
             $new_status = self::STATUS_PENDING_ADMIN;
         }
 
@@ -318,8 +331,7 @@ final class CustomerApproval {
             'domain' => $domain,
             'status' => $new_status,
         ]);
-        wc_add_notice($notice, 'success');
-        wp_safe_redirect(self::my_account_url());
+        wp_safe_redirect(add_query_arg('enovos_verified', $whitelisted ? 'approved' : 'pending_admin', self::my_account_url()));
         exit;
     }
 
