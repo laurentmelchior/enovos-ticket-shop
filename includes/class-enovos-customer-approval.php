@@ -32,6 +32,7 @@ final class CustomerApproval {
         add_action('woocommerce_after_checkout_validation', [self::class, 'validate_checkout'], 10, 2);
         add_filter('rest_pre_dispatch', [self::class, 'validate_store_api_checkout'], 10, 3);
         add_action('woocommerce_login_form_end', [self::class, 'render_resend_form']);
+        add_filter('wc_get_template', [self::class, 'resend_page_template'], 10, 5);
         add_action('admin_post_nopriv_enovos_resend_verification', [self::class, 'handle_resend']);
         add_action('admin_post_enovos_resend_verification', [self::class, 'handle_resend']);
     }
@@ -207,15 +208,25 @@ final class CustomerApproval {
         if (!self::enabled()) {
             return;
         }
-        echo '<div class="enovos-verification-resend">';
-        echo '<p>' . esc_html__('Did not receive the verification email?', 'enovos-ticket-shop') . '</p>';
-        echo '<form method="post" action="' . esc_url(admin_url('admin-post.php')) . '">';
-        echo '<input type="hidden" name="action" value="enovos_resend_verification">';
-        wp_nonce_field('enovos_resend_verification', 'enovos_resend_nonce');
-        echo '<p><label for="enovos_resend_email">' . esc_html__('Email address', 'enovos-ticket-shop') . '</label></p>';
-        echo '<p><input type="email" id="enovos_resend_email" name="email" autocomplete="email" required></p>';
-        echo '<p><button type="submit" class="woocommerce-button button">' . esc_html__('Send a new verification link', 'enovos-ticket-shop') . '</button></p>';
-        echo '</form></div>';
+        echo '<p class="woocommerce-LostPassword lost_password">';
+        echo '<a href="' . esc_url(self::resend_page_url()) . '">' . esc_html__('Did not receive the verification email?', 'enovos-ticket-shop') . '</a>';
+        echo '</p>';
+    }
+
+    /**
+     * @param mixed $args
+     */
+    public static function resend_page_template(string $template, string $template_name, $args, string $template_path, string $default_path): string {
+        unset($args, $template_path, $default_path);
+        if (
+            $template_name !== 'myaccount/form-login.php'
+            || is_user_logged_in()
+            || !self::enabled()
+            || sanitize_key((string) ($_GET['enovos_verification_resend'] ?? '')) !== '1'
+        ) {
+            return $template;
+        }
+        return ENOVOS_TICKET_SHOP_DIR . 'templates/myaccount/enovos-verification-resend.php';
     }
 
     public static function handle_resend(): void {
@@ -416,6 +427,10 @@ final class CustomerApproval {
     private static function my_account_url(): string {
         $url = wc_get_page_permalink('myaccount');
         return is_string($url) && $url !== '' ? $url : home_url('/');
+    }
+
+    private static function resend_page_url(): string {
+        return add_query_arg('enovos_verification_resend', '1', self::my_account_url());
     }
 
     private static function resend_rate_key(string $email): string {

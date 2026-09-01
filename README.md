@@ -95,7 +95,7 @@ The following notifications can be enabled and edited under **WooCommerce > Sett
 - Customer account approved
 - Customer account rejected
 
-The public resend form always returns the same response, whether or not an account exists, and limits repeated requests.
+The login page shows **Did not receive the verification email?** as a simple link next to the standard lost-password option. It opens a separate WooCommerce-style page where customers can request a new verification message. The resend flow always returns the same response, whether or not an account exists, and limits repeated requests.
 
 ## Beefree email templates
 
