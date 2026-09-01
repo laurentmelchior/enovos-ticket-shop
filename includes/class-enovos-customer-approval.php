@@ -65,11 +65,11 @@ final class CustomerApproval {
         return get_user_meta($customer_id, self::STATUS_META, true) === self::STATUS_APPROVED;
     }
 
-    public static function registration_redirect(string $redirect): string {
+    public static function registration_redirect($redirect): string {
         if (!self::enabled()) {
-            return $redirect;
+            return is_string($redirect) ? $redirect : self::my_account_url();
         }
-        return add_query_arg('enovos_registration', 'pending', wc_get_page_permalink('myaccount'));
+        return add_query_arg('enovos_registration', 'pending', self::my_account_url());
     }
 
     /**
@@ -119,10 +119,10 @@ final class CustomerApproval {
         if (is_user_logged_in() && self::is_pending(get_current_user_id())) {
             wp_logout();
             wc_add_notice(
-                __('Your customer account must be approved before you can access the shop.', 'enovos-ticket-shop'),
+                __('Your customer account must be approved before you can sign in or place an order.', 'enovos-ticket-shop'),
                 'error'
             );
-            wp_safe_redirect(wc_get_page_permalink('myaccount'));
+            wp_safe_redirect(self::my_account_url());
             exit;
         }
     }
@@ -140,7 +140,7 @@ final class CustomerApproval {
                 __('Your customer account must be approved before you can place an order.', 'enovos-ticket-shop')
             );
         }
-        if (!is_user_logged_in() && !empty($data['createaccount'])) {
+        if (!is_user_logged_in() && (!empty($data['createaccount']) || self::checkout_registration_required())) {
             $errors->add(
                 'enovos_register_before_checkout',
                 __('Please register and confirm your email address before creating an account during checkout.', 'enovos-ticket-shop')
@@ -167,7 +167,7 @@ final class CustomerApproval {
                 ['status' => 403]
             );
         }
-        if (!is_user_logged_in() && $request->get_param('create_account')) {
+        if (!is_user_logged_in() && ($request->get_param('create_account') || self::checkout_registration_required())) {
             return new \WP_Error(
                 'enovos_register_before_checkout',
                 __('Please register and confirm your email address before creating an account during checkout.', 'enovos-ticket-shop'),
@@ -209,7 +209,7 @@ final class CustomerApproval {
                 ]);
             }
         }
-        wp_safe_redirect(add_query_arg('enovos_resend', 'submitted', wc_get_page_permalink('myaccount')));
+        wp_safe_redirect(add_query_arg('enovos_resend', 'submitted', self::my_account_url()));
         exit;
     }
 
@@ -269,7 +269,7 @@ final class CustomerApproval {
             'enovos_verify_email' => '1',
             'user_id' => $user_id,
             'token' => rawurlencode($token),
-        ], wc_get_page_permalink('myaccount'));
+        ], self::my_account_url());
     }
 
     private static function handle_verification_link(): void {
@@ -290,7 +290,7 @@ final class CustomerApproval {
                 __('This verification link is invalid or has expired. Please request a new link.', 'enovos-ticket-shop'),
                 'error'
             );
-            wp_safe_redirect(wc_get_page_permalink('myaccount'));
+            wp_safe_redirect(self::my_account_url());
             exit;
         }
 
@@ -319,7 +319,7 @@ final class CustomerApproval {
             'status' => $new_status,
         ]);
         wc_add_notice($notice, 'success');
-        wp_safe_redirect(wc_get_page_permalink('myaccount'));
+        wp_safe_redirect(self::my_account_url());
         exit;
     }
 
@@ -362,6 +362,15 @@ final class CustomerApproval {
             [self::STATUS_PENDING_EMAIL, self::STATUS_PENDING_ADMIN],
             true
         );
+    }
+
+    private static function checkout_registration_required(): bool {
+        return function_exists('WC') && WC()->checkout() && WC()->checkout()->is_registration_required();
+    }
+
+    private static function my_account_url(): string {
+        $url = wc_get_page_permalink('myaccount');
+        return is_string($url) && $url !== '' ? $url : home_url('/');
     }
 
     private static function resend_rate_key(string $email): string {

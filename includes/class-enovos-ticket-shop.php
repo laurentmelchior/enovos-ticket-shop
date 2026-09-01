@@ -179,6 +179,9 @@ final class Plugin {
     }
 
     public function register_customer_approval_emails(array $emails): array {
+        require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-customer-verify.php';
+        require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-admin-approval.php';
+        require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-customer-approved.php';
         $emails['Enovos_Email_Customer_Verify'] = new EmailCustomerVerify();
         $emails['Enovos_Email_Admin_Approval'] = new EmailAdminApproval();
         $emails['Enovos_Email_Customer_Approved'] = new EmailCustomerApproved();

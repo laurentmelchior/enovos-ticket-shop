@@ -47,9 +47,6 @@ add_action('plugins_loaded', static function () {
     if (!class_exists('WooCommerce')) {
         return;
     }
-    require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-customer-verify.php';
-    require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-admin-approval.php';
-    require_once ENOVOS_TICKET_SHOP_DIR . 'includes/emails/class-enovos-email-customer-approved.php';
     \Enovos\TicketShop\Plugin::instance();
 });
 

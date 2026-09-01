@@ -36,7 +36,8 @@ final class EmailCustomerApproved extends \WC_Email {
             $this->object = $user;
             $this->recipient = $user->user_email;
             $this->placeholders['{customer_name}'] = $user->display_name;
-            $this->placeholders['{login_url}'] = wc_get_page_permalink('myaccount');
+            $login_url = wc_get_page_permalink('myaccount');
+            $this->placeholders['{login_url}'] = is_string($login_url) && $login_url !== '' ? $login_url : home_url('/');
         }
         if ($this->is_enabled() && $this->get_recipient()) {
             $this->send(
