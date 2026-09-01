@@ -510,6 +510,7 @@ final class Plugin {
         }
         $base_url = admin_url('admin.php?page=enovos-ticket-shop-settings');
         echo '<div class="wrap enovos-admin"><h1>Settings</h1>';
+        settings_errors();
         echo '<p class="enovos-admin-lead">' . ($section === 'customer-approval'
             ? 'Configure email verification, automatic domain approval, and administrator notifications.'
             : 'Configure ticket imports, AI providers, product delivery, and the Enovos Tickets dashboard.') . '</p>';
