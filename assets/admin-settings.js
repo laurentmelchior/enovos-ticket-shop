@@ -17,6 +17,13 @@
       });
     }
 
+    var emailSelect = document.getElementById('enovos_email_id');
+    if (emailSelect && emailSelect.form) {
+      emailSelect.addEventListener('change', function () {
+        emailSelect.form.submit();
+      });
+    }
+
     document.querySelectorAll('.enovos-copy-token').forEach(function (button) {
       button.addEventListener('click', function () {
         var token = button.getAttribute('data-token') || '';
