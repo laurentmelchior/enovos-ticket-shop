@@ -11,6 +11,7 @@ final class EmailTemplateEditor {
 
     public static function init(): void {
         add_action('admin_post_enovos_save_email_template', [self::class, 'handle_save']);
+        add_filter('woocommerce_email_headers', [self::class, 'capture_email_from_headers'], 999, 4);
         add_filter('woocommerce_email_styles', [self::class, 'capture_email'], 1, 2);
         add_filter('woocommerce_mail_content', [self::class, 'replace_mail_content'], 999);
     }
@@ -19,14 +20,24 @@ final class EmailTemplateEditor {
      * @param mixed $email
      */
     public static function capture_email(string $css, $email): string {
-        self::$active_email = $email instanceof \WC_Email ? $email : null;
+        self::$active_email = $email instanceof \WC_Email && $email->id !== '' ? $email : null;
         return $css;
+    }
+
+    /**
+     * @param mixed $object
+     * @param mixed $email
+     */
+    public static function capture_email_from_headers(string $headers, string $email_id, $object, $email): string {
+        unset($email_id, $object);
+        self::$active_email = $email instanceof \WC_Email && $email->id !== '' ? $email : null;
+        return $headers;
     }
 
     public static function replace_mail_content(string $content): string {
         $email = self::$active_email;
         self::$active_email = null;
-        if (!$email instanceof \WC_Email) {
+        if (!$email instanceof \WC_Email || $email->get_email_type() !== 'html') {
             return $content;
         }
         $settings = self::settings();
@@ -145,8 +156,8 @@ final class EmailTemplateEditor {
     }
 
     private static function format_template(string $template, \WC_Email $email): string {
-        $formatted = $email->format_string($template);
-        return strtr($formatted, self::replacement_values($email));
+        $formatted = strtr($template, self::replacement_values($email));
+        return $email->format_string($formatted);
     }
 
     /**
@@ -199,6 +210,20 @@ final class EmailTemplateEditor {
             '{login_url}' => esc_url(is_string($login_url) && $login_url !== '' ? $login_url : $site_url),
             '{reset_password_url}' => esc_url($reset_url),
         ];
+        foreach (['{verification_url}', '{approve_url}', '{reject_url}'] as $url_token) {
+            if (isset($native[$url_token])) {
+                $values[$url_token] = esc_url((string) $native[$url_token]);
+            }
+        }
+        if (isset($native['{customer_domain}'])) {
+            $values['{customer_domain}'] = esc_html((string) $native['{customer_domain}']);
+        }
+        if ($values['{customer_name}'] === '' && isset($native['{customer_name}'])) {
+            $values['{customer_name}'] = esc_html((string) $native['{customer_name}']);
+        }
+        if ($values['{customer_email}'] === '' && isset($native['{customer_email}'])) {
+            $values['{customer_email}'] = sanitize_email((string) $native['{customer_email}']);
+        }
 
         if ($order instanceof \WC_Order) {
             $date = $order->get_date_created();
@@ -333,7 +358,12 @@ final class EmailTemplateEditor {
     private static function applicable_placeholders(\WC_Email $email): array {
         $tokens = ['{site_title}', '{site_address}', '{site_url}', '{store_address}', '{store_email}', '{shop_url}'];
         $object = $email->object ?? null;
-        if ($object instanceof \WC_Order) {
+        $order_email_ids = [
+            'new_order', 'cancelled_order', 'failed_order', 'customer_on_hold_order',
+            'customer_processing_order', 'customer_completed_order', 'customer_refunded_order',
+            'customer_invoice', 'customer_note',
+        ];
+        if ($object instanceof \WC_Order || in_array($email->id, $order_email_ids, true)) {
             $tokens = array_merge($tokens, [
                 '{customer_name}', '{customer_email}', '{customer_first_name}', '{customer_last_name}',
                 '{order_number}', '{order_date}', '{order_total}', '{order_subtotal}', '{order_status}',
@@ -341,14 +371,25 @@ final class EmailTemplateEditor {
                 '{billing_address}', '{billing_phone}', '{shipping_address}', '{view_order_url}', '{order_items}',
             ]);
         }
-        if ($object instanceof \WP_User || str_contains($email->id, 'customer_new_account') || str_contains($email->id, 'reset_password')) {
+        if (
+            $object instanceof \WP_User
+            || in_array($email->id, $order_email_ids, true)
+            || str_contains($email->id, 'customer_new_account')
+            || str_contains($email->id, 'reset_password')
+        ) {
             $tokens = array_merge($tokens, [
                 '{customer_name}', '{customer_email}', '{customer_first_name}', '{customer_last_name}',
                 '{login_url}', '{reset_password_url}',
             ]);
         }
-        if (str_starts_with($email->id, 'enovos_')) {
-            $tokens = array_merge($tokens, array_keys(self::placeholder_groups()[__('Enovos approval', 'enovos-ticket-shop')]));
+        $enovos_tokens = [
+            'enovos_customer_verify' => ['{customer_name}', '{customer_email}', '{verification_url}'],
+            'enovos_admin_customer_approval' => ['{customer_name}', '{customer_email}', '{customer_domain}', '{approve_url}', '{reject_url}'],
+            'enovos_customer_approved' => ['{customer_name}', '{customer_email}', '{login_url}'],
+            'enovos_customer_rejected' => ['{customer_name}', '{customer_email}', '{shop_url}'],
+        ];
+        if (isset($enovos_tokens[$email->id])) {
+            $tokens = array_merge($tokens, $enovos_tokens[$email->id]);
         }
         $native = is_array($email->placeholders ?? null) ? array_keys($email->placeholders) : [];
         return array_values(array_unique(array_merge($tokens, $native)));

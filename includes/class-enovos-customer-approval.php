@@ -145,14 +145,9 @@ final class CustomerApproval {
             }
         }
         if (is_user_logged_in() && self::is_blocked(get_current_user_id())) {
-            $status = (string) get_user_meta(get_current_user_id(), self::STATUS_META, true);
+            $message = self::blocked_message(get_current_user_id());
             wp_logout();
-            wc_add_notice(
-                $status === self::STATUS_REJECTED
-                    ? __('Your customer account was not approved. Please contact the shop if you think this is a mistake.', 'enovos-ticket-shop')
-                    : __('Your customer account must be approved before you can sign in or place an order.', 'enovos-ticket-shop'),
-                'error'
-            );
+            wc_add_notice($message, 'error');
             wp_safe_redirect(self::my_account_url());
             exit;
         }
@@ -168,7 +163,7 @@ final class CustomerApproval {
         if (is_user_logged_in() && self::is_blocked(get_current_user_id())) {
             $errors->add(
                 'enovos_customer_pending',
-                __('Your customer account must be approved before you can place an order.', 'enovos-ticket-shop')
+                self::blocked_message(get_current_user_id())
             );
         }
         if (!is_user_logged_in() && (!empty($data['createaccount']) || self::checkout_registration_required())) {
@@ -194,7 +189,7 @@ final class CustomerApproval {
         if (is_user_logged_in() && self::is_blocked(get_current_user_id())) {
             return new \WP_Error(
                 'enovos_customer_pending',
-                __('Your customer account must be approved before you can place an order.', 'enovos-ticket-shop'),
+                self::blocked_message(get_current_user_id()),
                 ['status' => 403]
             );
         }
@@ -406,6 +401,12 @@ final class CustomerApproval {
             [self::STATUS_PENDING_EMAIL, self::STATUS_PENDING_ADMIN, self::STATUS_REJECTED],
             true
         );
+    }
+
+    private static function blocked_message(int $user_id): string {
+        return get_user_meta($user_id, self::STATUS_META, true) === self::STATUS_REJECTED
+            ? __('Your customer account was not approved. Please contact the shop if you think this is a mistake.', 'enovos-ticket-shop')
+            : __('Your customer account must be approved before you can sign in or place an order.', 'enovos-ticket-shop');
     }
 
     private static function checkout_registration_required(): bool {
