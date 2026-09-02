@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 0.7.0 – 2026-09-02
+- Fixed Attach Me! customer visibility so ticket PDFs remain hidden until the configured delivery status.
+- Kept Completed tickets visible after a Processing delivery configuration advances to Completed.
+- Added an optional, non-duplicating audit and repair tool for Attach Me! visibility metadata created before version 0.7.0.
+
 ## Version 0.6.0 – 2026-09-02
 - Renamed the visible plugin and admin interface to Enovos WooCommerce Addons without changing the installed slug, settings keys or update path.
 - Declared WooCommerce HPOS compatibility and added explicit ticket reservation for Store API / Block Checkout orders.

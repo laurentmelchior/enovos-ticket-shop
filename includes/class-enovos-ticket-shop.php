@@ -38,6 +38,7 @@ final class Plugin {
             'enable_ticket_resend' => 1,
             'enable_system_check' => 1,
             'enable_delivery_order_note' => 1,
+            'enable_attachment_repair' => 1,
             'auto_select_ready_events' => 1,
             'enable_customer_approval' => 1,
             'approval_domain_whitelist' => '',
@@ -84,6 +85,9 @@ final class Plugin {
         }
         if (self::enabled('enable_delivery_order_note') || self::enabled('enable_ticket_resend')) {
             DeliveryTracking::init();
+        }
+        if (self::enabled('enable_attachment_repair')) {
+            AttachMeRepair::init();
         }
     }
 
@@ -197,6 +201,7 @@ final class Plugin {
         $settings['enable_ticket_resend'] = $bool($input, 'enable_ticket_resend');
         $settings['enable_system_check'] = $bool($input, 'enable_system_check');
         $settings['enable_delivery_order_note'] = $bool($input, 'enable_delivery_order_note');
+        $settings['enable_attachment_repair'] = $bool($input, 'enable_attachment_repair');
         $settings['auto_select_ready_events'] = $bool($input, 'auto_select_ready_events');
         return $settings;
     }
@@ -598,6 +603,7 @@ final class Plugin {
             $this->toggle('enable_ticket_resend', (int) $s['enable_ticket_resend'], 'Resend ticket email', 'Allow administrators to trigger the existing Attach Me! customer email again.');
             $this->toggle('enable_system_check', (int) $s['enable_system_check'], 'System check', 'Show the PDF, tax, category, AI, uploads and Attach Me! preflight checks.');
             $this->toggle('enable_delivery_order_note', (int) $s['enable_delivery_order_note'], 'Ticket delivery order note', 'Record successful original and resent ticket emails in the order notes.');
+            $this->toggle('enable_attachment_repair', (int) $s['enable_attachment_repair'], 'Existing attachment repair', 'Audit and repair customer visibility for Enovos ticket attachments created before version 0.7.0.');
             echo '</ul></div></div>';
 
             if (!empty($s['enable_system_check'])) {
@@ -623,7 +629,11 @@ final class Plugin {
 
         echo '</div><div class="enovos-actions-bar"><button class="button button-primary button-large">Save settings</button>';
         echo '<a class="button button-secondary" href="' . esc_url(admin_url('admin.php?page=enovos-ticket-shop')) . '">Back to Enovos WooCommerce Addons</a></div>';
-        echo '</form></div>';
+        echo '</form>';
+        if ($section === 'ticket-shop' && !empty($s['enable_attachment_repair'])) {
+            AttachMeRepair::render();
+        }
+        echo '</div>';
     }
 
     private function field(string $label, string $key, string $value, string $type = 'text'): void {

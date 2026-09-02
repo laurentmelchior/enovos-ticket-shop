@@ -511,6 +511,17 @@
   background: #fcf0f1;
 }
 
+.enovos-repair-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.enovos-repair-actions form {
+  margin: 0;
+}
+
 @media (max-width: 782px) {
   .enovos-settings-tabs {
     gap: 4px;

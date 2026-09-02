@@ -60,10 +60,13 @@ Under **Enovos WooCommerce Addons > Settings > Ticket Shop** you can also enable
 - Ticket email resend through existing Attach Me! attachments
 - System preflight checks
 - Successful ticket-delivery order notes
+- Existing Attach Me! visibility audit and repair
 
 ## Order support and delivery
 
 The WooCommerce order screen can show a compact **Enovos tickets** box beside Attach Me!. It lists the assigned concert, package number, ticket pages and Enovos inventory status. Attach Me! remains responsible for the attachment list, secure customer downloads and embedding the PDF in the configured customer email.
+
+Customer visibility follows **Ticket delivery status**. With the default `Completed` setting, Attach Me! registers the file on the order immediately but hides it from Order Details and My Account until the order is Completed. With `Processing`, it is visible for both Processing and Completed orders.
 
 For delivered packages, administrators can resend the configured Completed or Processing customer email. The same Attach Me! files are used again: no new package is reserved and stock does not change. Successful original and repeated deliveries can be recorded in the order notes.
 
@@ -82,13 +85,16 @@ When enabled, **Settings > Ticket Shop** shows read-only preflight checks for:
 
 ## Feature switches and rollback
 
-The order box, resend action, system check and delivery notes have independent settings and do not create new database tables. Disabling a switch stops its hooks on the next request without deleting existing order or ticket data.
+The order box, resend action, system check, delivery notes and existing-attachment repair have independent settings and do not create new database tables. Disabling a switch stops its hooks on the next request without deleting existing order or ticket data.
+
+The repair card under **Settings > Ticket Shop** can audit Enovos ticket attachments created before version 0.7.0. It changes only an identified Attach Me! visibility-status array and only when the installed Attach Me! model exposes a supported public metadata setter. If the storage structure is not recognized, it reports the incompatibility and writes nothing. It never uploads or duplicates an attachment.
 
 For complete code removal in a future release:
 
 - Order box + resend: remove `includes/class-enovos-order-tickets.php`, its bootstrap `require_once`, initialization and the two matching settings.
 - Delivery notes: remove `includes/class-enovos-delivery-tracking.php`, its bootstrap `require_once`, initialization and setting.
 - System check: remove `includes/class-enovos-system-check.php`, its bootstrap `require_once`, render call and setting.
+- Existing-attachment repair: remove `includes/class-enovos-attach-me-repair.php`, its bootstrap `require_once`, initialization, render call and setting.
 - HPOS + Store API safety: `includes/class-enovos-woocommerce-compatibility.php` is intentionally not switchable because removing Store API reservation can produce orders without assigned ticket packages.
 
 ## Ticket inventory
