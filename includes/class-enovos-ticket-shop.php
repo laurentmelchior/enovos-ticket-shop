@@ -388,7 +388,7 @@ final class Plugin {
             delete_transient('enovos_ticket_shop_inventory_notice_' . get_current_user_id());
         }
 
-        echo '<div class="wrap enovos-admin"><h1>Ticket Inventory</h1>';
+        echo '<div class="wrap enovos-admin enovos-admin--wide"><h1>Ticket Inventory</h1>';
         echo '<p class="enovos-admin-lead">Every row is one protected PDF containing exactly two physical ticket pages. Use Download to save the PDF with the concert name. Deleting a row removes the inventory record and the PDF file. RESERVED packages linked to an open order cannot be deleted.</p>';
         if (is_array($notice)) {
             $class = !empty($notice['errors']) ? 'notice-warning' : 'notice-success';

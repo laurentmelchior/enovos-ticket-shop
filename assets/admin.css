@@ -6,6 +6,7 @@
 
 .enovos-admin--wide {
   max-width: none;
+  width: 100%;
 }
 
 .enovos-admin h1 {
