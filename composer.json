@@ -1,6 +1,6 @@
 {
   "name": "enovos/ticket-shop",
-  "description": "Enovos Concert Ticket Shop Importer",
+  "description": "Enovos WooCommerce Addons",
   "type": "wordpress-plugin",
   "require": {
     "php": ">=8.0",

@@ -1,5 +1,14 @@
 # Changelog
 
+## Version 0.6.0 – 2026-09-02
+- Renamed the visible plugin and admin interface to Enovos WooCommerce Addons without changing the installed slug, settings keys or update path.
+- Declared WooCommerce HPOS compatibility and added explicit ticket reservation for Store API / Block Checkout orders.
+- Added an optional Enovos ticket-status box to WooCommerce orders beside Attach Me!.
+- Added an optional, nonce-protected resend action that reuses the existing Attach Me! files without reserving another package.
+- Added optional order notes for successful original and repeated ticket emails.
+- Added an optional system check for the PDF engine, VAT 3% tax class, den-atelier category, selected AI credentials, protected uploads and Attach Me!.
+- Kept each visible addition independently switchable and documented its complete rollback path.
+
 ## Version 0.5.1 – 2026-09-01
 - Replaced the verification resend form inside the login form with a Lost Password-style link and a dedicated resend page.
 

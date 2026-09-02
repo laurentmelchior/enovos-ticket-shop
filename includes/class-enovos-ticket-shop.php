@@ -34,6 +34,10 @@ final class Plugin {
             'enable_attach_me' => 1,
             'enable_native_email_attach' => 1,
             'enable_atelier_enrichment' => 1,
+            'enable_order_ticket_box' => 1,
+            'enable_ticket_resend' => 1,
+            'enable_system_check' => 1,
+            'enable_delivery_order_note' => 1,
             'auto_select_ready_events' => 1,
             'enable_customer_approval' => 1,
             'approval_domain_whitelist' => '',
@@ -75,11 +79,21 @@ final class Plugin {
         CustomerApproval::init();
         CustomerApprovalAdmin::init();
         EmailTemplateEditor::init();
+        if (self::enabled('enable_order_ticket_box')) {
+            OrderTickets::init();
+        }
+        if (self::enabled('enable_delivery_order_note') || self::enabled('enable_ticket_resend')) {
+            DeliveryTracking::init();
+        }
     }
 
     public function enqueue_admin_assets(string $hook): void {
+        unset($hook);
         $page = isset($_GET['page']) ? sanitize_key((string) $_GET['page']) : '';
-        if (!in_array($page, [
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        $is_order_screen = $page === 'wc-orders'
+            || ($screen instanceof \WP_Screen && $screen->post_type === 'shop_order');
+        if (!$is_order_screen && !in_array($page, [
             'enovos-ticket-shop',
             'enovos-ticket-inventory',
             'enovos-pending-customers',
@@ -121,7 +135,7 @@ final class Plugin {
     }
 
     public function admin_menu(): void {
-        add_menu_page('Enovos Ticket Shop', 'Enovos Tickets', 'manage_woocommerce', 'enovos-ticket-shop', [$this, 'render_dashboard'], 'dashicons-tickets-alt', 56);
+        add_menu_page('Enovos WooCommerce Addons', 'Enovos WooCommerce Addons', 'manage_woocommerce', 'enovos-ticket-shop', [$this, 'render_dashboard'], 'dashicons-admin-plugins', 56);
         add_submenu_page('enovos-ticket-shop', 'Ticket Inventory', 'Ticket Inventory', 'manage_woocommerce', 'enovos-ticket-inventory', [$this, 'render_inventory']);
         add_submenu_page('enovos-ticket-shop', 'Settings', 'Settings', 'manage_woocommerce', 'enovos-ticket-shop-settings', [$this, 'render_settings']);
         add_submenu_page('enovos-ticket-shop', 'Changelog', 'Changelog', 'manage_woocommerce', 'enovos-ticket-shop-changelog', [$this, 'render_changelog']);
@@ -179,6 +193,10 @@ final class Plugin {
         $settings['enable_attach_me'] = $bool($input, 'enable_attach_me');
         $settings['enable_native_email_attach'] = $bool($input, 'enable_native_email_attach');
         $settings['enable_atelier_enrichment'] = $bool($input, 'enable_atelier_enrichment');
+        $settings['enable_order_ticket_box'] = $bool($input, 'enable_order_ticket_box');
+        $settings['enable_ticket_resend'] = $bool($input, 'enable_ticket_resend');
+        $settings['enable_system_check'] = $bool($input, 'enable_system_check');
+        $settings['enable_delivery_order_note'] = $bool($input, 'enable_delivery_order_note');
         $settings['auto_select_ready_events'] = $bool($input, 'auto_select_ready_events');
         return $settings;
     }
@@ -209,7 +227,7 @@ final class Plugin {
         $engine = PdfPackages::engine_status();
         $attach_me_on = AttachMe::is_active() && !empty($settings['enable_attach_me']);
 
-        echo '<div class="wrap enovos-admin enovos-admin--wide"><h1>Enovos Concert Ticket Shop</h1>';
+        echo '<div class="wrap enovos-admin enovos-admin--wide"><h1>Enovos WooCommerce Addons</h1>';
         echo '<p class="enovos-admin-lead">Import concert ticket PDFs, create protected two-ticket packages, and deliver them with WooCommerce orders.</p>';
         if (is_array($analysis_notice)) {
             $notice_class = !empty($analysis_notice['success']) ? 'notice-success' : 'notice-warning';
@@ -515,7 +533,7 @@ final class Plugin {
         echo '<div class="wrap enovos-admin"><h1>Settings</h1>';
         settings_errors();
         $section_descriptions = [
-            'ticket-shop' => 'Configure ticket imports, AI providers, product delivery, and the Enovos Tickets dashboard.',
+            'ticket-shop' => 'Configure ticket imports, AI providers, product delivery, and the Enovos WooCommerce Addons dashboard.',
             'customer-approval' => 'Configure email verification, automatic domain approval, and administrator notifications.',
             'email-templates' => 'Paste Beefree HTML and manage placeholders for every registered WooCommerce email.',
         ];
@@ -530,7 +548,7 @@ final class Plugin {
             EmailTemplateEditor::render_notice();
             echo '<div class="enovos-settings-grid">';
             EmailTemplateEditor::render_settings();
-            echo '</div><div class="enovos-actions-bar"><a class="button button-secondary" href="' . esc_url(admin_url('admin.php?page=enovos-ticket-shop')) . '">Back to Enovos Tickets</a></div></div>';
+            echo '</div><div class="enovos-actions-bar"><a class="button button-secondary" href="' . esc_url(admin_url('admin.php?page=enovos-ticket-shop')) . '">Back to Enovos WooCommerce Addons</a></div></div>';
             return;
         }
         echo '<form method="post" action="options.php">';
@@ -575,8 +593,19 @@ final class Plugin {
             $this->toggle('enable_atelier_enrichment', (int) $s['enable_atelier_enrichment'], 'Atelier enrichment', 'Fetch artist/group image and extra Atelier page data during PDF analysis.');
             echo '</ul></div></div>';
 
-            echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Enovos Tickets dashboard</h2><p>Show or hide sections on the main Enovos Tickets page.</p></div><div class="enovos-card__body"><ul class="enovos-toggle-list">';
-            $this->toggle('show_debug_log', (int) $s['show_debug_log'], 'Import / Debug Log', 'Show the processing log panel on the Enovos Tickets dashboard.');
+            echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Order support &amp; diagnostics</h2><p>Each addition can be disabled independently without removing ticket or order data.</p></div><div class="enovos-card__body"><ul class="enovos-toggle-list">';
+            $this->toggle('enable_order_ticket_box', (int) $s['enable_order_ticket_box'], 'Ticket status box on orders', 'Show Enovos package status beside the Attach Me! box.');
+            $this->toggle('enable_ticket_resend', (int) $s['enable_ticket_resend'], 'Resend ticket email', 'Allow administrators to trigger the existing Attach Me! customer email again.');
+            $this->toggle('enable_system_check', (int) $s['enable_system_check'], 'System check', 'Show the PDF, tax, category, AI, uploads and Attach Me! preflight checks.');
+            $this->toggle('enable_delivery_order_note', (int) $s['enable_delivery_order_note'], 'Ticket delivery order note', 'Record successful original and resent ticket emails in the order notes.');
+            echo '</ul></div></div>';
+
+            if (!empty($s['enable_system_check'])) {
+                SystemCheck::render();
+            }
+
+            echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Enovos WooCommerce Addons dashboard</h2><p>Show or hide sections on the main Enovos WooCommerce Addons page.</p></div><div class="enovos-card__body"><ul class="enovos-toggle-list">';
+            $this->toggle('show_debug_log', (int) $s['show_debug_log'], 'Import / Debug Log', 'Show the processing log panel on the Enovos WooCommerce Addons dashboard.');
             $this->toggle('show_last_import', (int) $s['show_last_import'], 'Last import result', 'Show the last import summary table on the dashboard.');
             $this->toggle('enable_debug_logging', (int) $s['enable_debug_logging'], 'Write debug log entries', 'When off, no new log lines are written (existing log stays until cleared).');
             $this->toggle('auto_select_ready_events', (int) $s['auto_select_ready_events'], 'Auto-select ready concerts', 'Pre-check concerts that are ready for import in the import check table.');
@@ -593,7 +622,7 @@ final class Plugin {
         }
 
         echo '</div><div class="enovos-actions-bar"><button class="button button-primary button-large">Save settings</button>';
-        echo '<a class="button button-secondary" href="' . esc_url(admin_url('admin.php?page=enovos-ticket-shop')) . '">Back to Enovos Tickets</a></div>';
+        echo '<a class="button button-secondary" href="' . esc_url(admin_url('admin.php?page=enovos-ticket-shop')) . '">Back to Enovos WooCommerce Addons</a></div>';
         echo '</form></div>';
     }
 

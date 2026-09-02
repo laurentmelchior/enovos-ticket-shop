@@ -119,7 +119,7 @@ final class AttachMe {
         $order->update_meta_data('_enovos_wcam_synced_at', current_time('mysql'));
         $order->save();
         $order->add_order_note(sprintf(
-            'Enovos Ticket Shop: %d ticket PDF(s) registered in Attach Me! attachments.',
+            'Enovos WooCommerce Addons: %d ticket PDF(s) registered in Attach Me! attachments.',
             count($media_items)
         ));
         Logger::log('OK', 'Ticket PDFs registered in Attach Me!', [
