@@ -922,9 +922,9 @@ TXT;
         $date = trim((string) ($event['date'] ?? ''));
         $prompt = sprintf(
             'Find a public HTTPS page with an official artist or group press photo for "%s"%s. '
-            . 'Prefer the artist website, record label, management, official event organizer, or a reputable press page. '
+            . 'Use the official artist website, record label, management, or a dedicated artist profile or interview from a reputable press publication. '
             . 'The page title or metadata must clearly identify the exact artist or group. '
-            . 'Do not return an image-search result, social network, ticket graphic, venue image, logo, poster, or generic event image. '
+            . 'Do not return an event organizer, venue, event listing, image-search result, social network, ticket graphic, logo, poster, or generic event image. '
             . 'Return the source web page URL, not a guessed direct image URL.',
             $title,
             $date !== '' ? ' (concert date ' . $date . ')' : ''
@@ -938,10 +938,13 @@ TXT;
                     'type' => 'object',
                     'properties' => [
                         'source_page_url' => ['type' => 'string'],
+                        'source_type' => [
+                            'type' => 'string',
+                            'enum' => ['artist', 'label', 'management', 'press'],
+                        ],
                         'evidence' => ['type' => 'string'],
                     ],
-                    'required' => ['source_page_url', 'evidence'],
-                    'additionalProperties' => false,
+                    'required' => ['source_page_url', 'source_type', 'evidence'],
                 ],
             ],
         ];
@@ -971,8 +974,18 @@ TXT;
         foreach (($data['candidates'][0]['content']['parts'] ?? []) as $part) {
             $text .= $part['text'] ?? '';
         }
+        if ($text === '') {
+            Logger::log('FAIL', 'Gemini artist image search returned no content', [
+                'finish_reason' => (string) ($data['candidates'][0]['finishReason'] ?? ''),
+                'block_reason' => (string) ($data['promptFeedback']['blockReason'] ?? ''),
+            ]);
+        }
         $result = json_decode(trim($text), true);
-        if (!is_array($result) || empty($result['source_page_url'])) {
+        if (
+            !is_array($result)
+            || empty($result['source_page_url'])
+            || !in_array((string) ($result['source_type'] ?? ''), ['artist', 'label', 'management', 'press'], true)
+        ) {
             return new \WP_Error('gemini_artist_image_json', 'Gemini did not return an artist image source page.');
         }
         if (self::safe_source_page_url((string) $result['source_page_url']) === '') {

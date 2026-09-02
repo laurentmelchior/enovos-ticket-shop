@@ -35,7 +35,7 @@ Only the selected provider is called. Custom AI supports Bearer authentication, 
 
 If the official Atelier price cannot be verified, the selected AI provider performs a broader exact-event web search across credible organizers, primary ticket sellers, venues, and event listings. A result is displayed as **Suggested – review**, never as verified.
 
-With Gemini selected, a missing artist image triggers a separate grounded web search even when no Atelier URL was found. The plugin uses the returned official artist, label, management, organizer or reputable press page as evidence, extracts its social/structured image, and verifies that the image can be downloaded before import. The import check shows the selected image source or the reason no verified image was accepted.
+With Gemini selected, a missing artist image triggers a separate grounded web search even when no Atelier URL was found. The plugin uses the returned official artist, label, management or dedicated reputable press page as evidence, extracts its social/structured image, and verifies that the image can be downloaded before import. Venue and event-listing pages are excluded. The import check shows the selected image source or the reason no verified image was accepted.
 
 Every structurally valid concert remains available in the import check. Its ticket price is editable, accepts a decimal point or comma, and must be reviewed before import:
 
