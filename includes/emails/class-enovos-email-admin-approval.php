@@ -6,6 +6,8 @@ if (!defined('ABSPATH')) {
 }
 
 final class EmailAdminApproval extends \WC_Email {
+    public string $user_login = '';
+
     public function __construct() {
         $this->id = 'enovos_admin_customer_approval';
         $this->title = __('Customer approval request', 'enovos-ticket-shop');
@@ -36,6 +38,7 @@ final class EmailAdminApproval extends \WC_Email {
         $user = get_userdata($user_id);
         if ($user instanceof \WP_User) {
             $this->object = $user;
+            $this->user_login = $user->user_login;
             $this->recipient = CustomerApproval::admin_recipients();
             $domain = strtolower((string) substr(strrchr($user->user_email, '@') ?: '', 1));
             $this->placeholders['{customer_name}'] = $user->display_name;
