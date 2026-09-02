@@ -37,6 +37,25 @@ final class SystemCheck {
         $writable_path = is_dir($private_dir) ? $private_dir : (string) ($uploads['basedir'] ?? '');
         $tax_classes = class_exists(\WC_Tax::class) ? \WC_Tax::get_tax_classes() : [];
         $category = taxonomy_exists('product_cat') ? get_term_by('slug', 'den-atelier', 'product_cat') : false;
+        $atelier = AI::atelier_page_diagnostic('https://www.atelier.lu/shows/squarepusher/');
+        if ($atelier['blocked']) {
+            $atelier_message = sprintf(
+                __('Atelier returned HTTP %d and a Cloudflare challenge. Date and header images cannot be verified from this server.', 'enovos-ticket-shop'),
+                $atelier['status']
+            );
+        } elseif (!$atelier['ok']) {
+            $atelier_message = sprintf(
+                __('Atelier could not be read (HTTP %d%s).', 'enovos-ticket-shop'),
+                $atelier['status'],
+                $atelier['error'] !== '' ? ': ' . $atelier['error'] : ''
+            );
+        } else {
+            $atelier_message = sprintf(
+                __('Atelier is reachable; detected date: %s; header image: %s.', 'enovos-ticket-shop'),
+                $atelier['date'] !== '' ? $atelier['date'] : __('missing', 'enovos-ticket-shop'),
+                $atelier['image_url'] !== '' ? __('found', 'enovos-ticket-shop') : __('missing', 'enovos-ticket-shop')
+            );
+        }
 
         return [
             [
@@ -64,6 +83,11 @@ final class SystemCheck {
                 'message' => self::ai_is_configured($settings)
                     ? sprintf(__('%s credentials are configured.', 'enovos-ticket-shop'), ucfirst((string) $settings['ai_provider']))
                     : sprintf(__('Configure the required %s credentials.', 'enovos-ticket-shop'), ucfirst((string) $settings['ai_provider'])),
+            ],
+            [
+                'ok' => $atelier['ok'] && $atelier['date'] !== '' && $atelier['image_url'] !== '',
+                'label' => __('Atelier page access', 'enovos-ticket-shop'),
+                'message' => $atelier_message,
             ],
             [
                 'ok' => empty($uploads['error']) && $writable_path !== '' && is_writable($writable_path),

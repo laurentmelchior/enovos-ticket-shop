@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 0.7.3 – 2026-09-02
+- Added an Impreza/WPBakery-compatible registration notice shortcode and page-builder element for the WooCommerce My Account page.
+- Preserved the post-registration notice through a short-lived secure cookie when redirects or caching remove its query parameter.
+- Required Atelier concert pages to match the authoritative PDF date before their URL, description, price context or image can be used.
+- Read the product image from the header metadata or hero area of the date-matched Atelier page instead of ranking image filenames.
+- Added Cloudflare, event-date and header-image diagnostics for Atelier page access to the system check.
+
 ## Version 0.7.2 – 2026-09-02
 - Expanded Ticket Inventory and the ticket PDF upload dashboard to the full WordPress admin content width.
 - Added `user_login` compatibility to all Enovos customer emails for the Email Templates plugin.
