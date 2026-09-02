@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 0.7.5 – 2026-09-02
+- Read current concert URLs from Atelier's dedicated `ate_show-sitemap.xml` before generic sitemap fallbacks.
+- Made the Atelier URL editable in the import check and safely retained administrator-entered links when Cloudflare or network errors prevent verification.
+- Read the concert date from the scoped hero `p.date` before structured-data fallbacks.
+- Accepted downloadable Ticketmatic header images only when extracted from a date-matched Atelier page.
+- Let Gemini 3.6 Flash try up to three verified artist, label, management or press source pages for an automatic image fallback.
+
 ## Version 0.7.4 – 2026-09-02
 - Replaced Atelier's WordPress text search with a cached, bounded lookup of `/shows/` URLs from its sitemap.
 
