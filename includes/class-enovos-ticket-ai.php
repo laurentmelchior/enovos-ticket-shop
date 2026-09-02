@@ -212,9 +212,6 @@ final class AI {
             $context = implode(' ', [
                 (string) $img->getAttribute('alt'),
                 (string) $img->getAttribute('title'),
-                (string) $img->getAttribute('class'),
-                (string) $img->getAttribute('id'),
-                $img->parentNode instanceof \DOMElement ? (string) $img->parentNode->getAttribute('class') : '',
             ]);
             foreach (['src', 'data-src', 'data-lazy-src'] as $attribute) {
                 self::add_image_candidate($candidates, (string) $img->getAttribute($attribute), 'content-image', $context);
@@ -302,9 +299,13 @@ final class AI {
             return;
         }
         foreach ($value as $key => $item) {
-            if (is_string($item) && in_array(strtolower((string) $key), ['url', 'contenturl'], true)) {
+            $normalized_key = strtolower((string) $key);
+            if (
+                is_string($item)
+                && (is_int($key) || in_array($normalized_key, ['url', 'contenturl'], true))
+            ) {
                 self::add_image_candidate($candidates, $item, 'json-ld', $context);
-            } else {
+            } elseif (is_array($item)) {
                 self::collect_json_ld_image_value($item, $context, $candidates);
             }
         }
@@ -359,6 +360,13 @@ final class AI {
     private static function validate_image_url(string $url, string $title, array $excluded_image_urls = []): string {
         $url = esc_url_raw($url);
         if (!$url || !self::is_likely_artist_image($url, $title) || self::image_is_excluded($url, $excluded_image_urls)) {
+            return '';
+        }
+        $normalized_url = self::normalize_image_text(rawurldecode($url));
+        if (!array_filter(
+            self::artist_title_tokens($title),
+            static fn(string $token): bool => str_contains($normalized_url, $token)
+        )) {
             return '';
         }
         $response = wp_remote_head($url, [
@@ -429,8 +437,8 @@ final class AI {
         unset($title);
         $lower = strtolower(rawurldecode($url . ' ' . $context));
         foreach ([
-            'logo', 'sponsor', 'footer', 'cookie', 'icon', 'avatar',
-            'ticket', 'qr', 'barcode', 'map', 'header', 'hero', 'banner',
+            'logo', 'sponsor', 'cookie', 'icon', 'avatar',
+            'ticket', 'qr', 'barcode', 'map',
             'placeholder', 'default-image', 'default_image',
         ] as $bad) {
             if (str_contains($lower, $bad)) {
@@ -449,11 +457,15 @@ final class AI {
             'and', 'at', 'avec', 'concert', 'den', 'feat', 'featuring', 'live',
             'luxembourg', 'presents', 'the', 'tour', 'with',
         ];
-        $tokens = preg_split('/[^a-z0-9]+/', $normalized) ?: [];
-        return array_values(array_unique(array_filter(
-            $tokens,
-            static fn(string $token): bool => strlen($token) >= 3 && !in_array($token, $stop_words, true)
+        $tokens = array_values(array_unique(array_filter(
+            preg_split('/[^a-z0-9]+/', $normalized) ?: [],
+            static fn(string $token): bool => strlen($token) >= 2
         )));
+        $meaningful_tokens = array_values(array_filter(
+            $tokens,
+            static fn(string $token): bool => !in_array($token, $stop_words, true)
+        ));
+        return $meaningful_tokens ?: $tokens;
     }
 
     private static function normalize_image_text(string $value): string {
