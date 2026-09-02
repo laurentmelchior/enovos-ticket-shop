@@ -12,8 +12,10 @@ final class CustomerApprovalAdmin {
         add_action('admin_post_enovos_approve_customer', [self::class, 'handle_approve']);
         add_action('admin_post_enovos_reject_customer', [self::class, 'handle_reject']);
         add_action('admin_post_enovos_admin_resend_verification', [self::class, 'handle_resend']);
-        add_filter('manage_users_columns', [self::class, 'add_user_status_column']);
-        add_filter('manage_users_custom_column', [self::class, 'render_user_status_column'], 10, 3);
+        if (CustomerApproval::enabled()) {
+            add_filter('manage_users_columns', [self::class, 'add_user_status_column']);
+            add_filter('manage_users_custom_column', [self::class, 'render_user_status_column'], 10, 3);
+        }
     }
 
     /**

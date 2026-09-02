@@ -150,18 +150,20 @@ final class CustomerApproval {
     }
 
     public static function prepend_registration_confirmation(string $content): string {
+        static $rendered = false;
         if (
-            !self::enabled()
+            $rendered
+            || !self::enabled()
             || strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'GET'
             || sanitize_key((string) ($_GET['enovos_registration'] ?? '')) !== 'pending'
             || !function_exists('is_account_page')
             || !is_account_page()
             || !is_main_query()
-            || !in_the_loop()
         ) {
             return $content;
         }
 
+        $rendered = true;
         $message = esc_html__(
             'Your account was created. Please check your inbox and confirm your email address before signing in.',
             'enovos-ticket-shop'
