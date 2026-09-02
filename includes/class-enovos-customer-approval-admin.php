@@ -12,6 +12,31 @@ final class CustomerApprovalAdmin {
         add_action('admin_post_enovos_approve_customer', [self::class, 'handle_approve']);
         add_action('admin_post_enovos_reject_customer', [self::class, 'handle_reject']);
         add_action('admin_post_enovos_admin_resend_verification', [self::class, 'handle_resend']);
+        add_filter('manage_users_columns', [self::class, 'add_user_status_column']);
+        add_filter('manage_users_custom_column', [self::class, 'render_user_status_column'], 10, 3);
+    }
+
+    /**
+     * @param array<string,string> $columns
+     * @return array<string,string>
+     */
+    public static function add_user_status_column(array $columns): array {
+        $columns['enovos_approval_status'] = __('Customer status', 'enovos-ticket-shop');
+        return $columns;
+    }
+
+    public static function render_user_status_column(string $output, string $column_name, int $user_id): string {
+        if ($column_name !== 'enovos_approval_status') {
+            return $output;
+        }
+
+        return match ((string) get_user_meta($user_id, CustomerApproval::STATUS_META, true)) {
+            CustomerApproval::STATUS_PENDING_EMAIL => esc_html__('Email not confirmed', 'enovos-ticket-shop'),
+            CustomerApproval::STATUS_PENDING_ADMIN => esc_html__('Pending', 'enovos-ticket-shop'),
+            CustomerApproval::STATUS_APPROVED => esc_html__('Approved', 'enovos-ticket-shop'),
+            CustomerApproval::STATUS_REJECTED => esc_html__('Rejected', 'enovos-ticket-shop'),
+            default => '—',
+        };
     }
 
     public static function decision_page_url(int $user_id, string $decision): string {
