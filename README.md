@@ -21,6 +21,7 @@ WordPress / WooCommerce plugin for importing concert ticket PDFs into products a
 - The ticket PDF price is never used.
 - Products are Simple Products, stock managed, Sold individually, and assigned to product category `den-atelier`.
 - Products use the `VAT 3%` tax class.
+- Featured images must match the artist or group named by the concert. Generic venue, header and Atelier placeholder images are rejected, and the same image is not reused for different concerts in one import.
 
 ## AI provider
 
@@ -106,7 +107,7 @@ The plugin preserves the imported master PDF in protected storage. During produc
 - `DELIVERED`
 - `INVALIDATED`
 
-The **Ticket Inventory** admin page shows package, source pages, PDF size, product, order and delivery state. Admins can download any package PDF (filename includes the concert name) or delete selected packages (DB row + PDF file). Packages that are `RESERVED` for an open order cannot be deleted until the order is cancelled/failed.
+The **Ticket Inventory** admin page shows package, source pages, PDF size, product, order and delivery state. Its Order column uses WooCommerce's formatted order number, including numbers supplied by compatible custom order-number plugins, while internal links continue to use the numeric order ID. Admins can download any package PDF (filename includes the concert name) or delete selected packages (DB row + PDF file). Packages that are `RESERVED` for an open order cannot be deleted until the order is cancelled/failed.
 
 Package PDFs are stored as `{concert-slug}-ticket-package-{nnn}.pdf` under the protected import directory.
 
@@ -125,6 +126,8 @@ New WooCommerce customer accounts use a two-step approval flow:
 Pending and rejected accounts cannot sign in or check out. Rejected accounts remain in WordPress and receive a rejection notification. Existing users without an Enovos approval status are unaffected.
 
 Manage waiting accounts under **WooCommerce > Pending Customers**. Administrators can directly approve or reject verified customers, or resend a verification message to customers who have not confirmed their email. Administrator emails contain separate Approve and Reject links. Each link requires a WordPress login and a POST confirmation, so email security scanners cannot change an account status.
+
+After registration, the My Account page displays a confirmation banner asking the customer to check their email. **WordPress > Users** shows a Customer status column with **Email not confirmed**, **Pending**, **Approved** or **Rejected**. Users created before this workflow and users outside it show no Enovos status.
 
 Enter one exact domain per line in the whitelist without `@`. A domain does not include its subdomains: for example, `company.com` does not match `shop.company.com`. Approval notification recipients are configurable; when left empty, the WordPress administration email is used.
 
