@@ -22,7 +22,7 @@ WordPress / WooCommerce plugin for importing concert ticket PDFs into products a
 - Products are Simple Products, stock managed, Sold individually, and assigned to product category `den-atelier`.
 - Products use the `VAT 3%` tax class.
 - An Atelier concert URL is accepted only when its page date exactly matches the date extracted from the PDF.
-- Featured images come only from the header metadata or hero area of that date-matched Atelier page. Generic assets are rejected, and the same image is not reused for different concerts in one import.
+- Featured images are taken from the header metadata or hero area of that date-matched Atelier page. Generic assets are rejected, every image is verified as downloadable, and the same image is not reused for different concerts in one import.
 
 ## AI provider
 
@@ -36,7 +36,9 @@ Only the selected provider is called. Custom AI supports Bearer authentication, 
 
 If the official Atelier price cannot be verified, the selected AI provider performs a broader exact-event web search across credible organizers, primary ticket sellers, venues, and event listings. A result is displayed as **Suggested – review**, never as verified.
 
-During enrichment, the candidate Atelier page is checked against the authoritative PDF date. The importer reads structured event data, HTML time metadata and the visible English date from the page. If no exact match is found, the Atelier URL and image remain empty and the import check displays a review warning instead of retaining an old concert link. Product images are never supplied by AI.
+During enrichment, the candidate Atelier page is checked against the authoritative PDF date, because Atelier keeps past concerts on the same `/shows/<slug>/` path. The importer reads structured event data, HTML time metadata and the visible English date from the page. If no exact match is found, the Atelier URL remains empty and the import check displays a review warning instead of retaining an old concert link.
+
+With Gemini selected, a missing artist image triggers a separate grounded web search even when no date-matched Atelier page was found. The plugin uses the returned official artist, label, management or dedicated reputable press page as evidence, extracts its social/structured image, and verifies that the image can be downloaded before import. Venue and event-listing pages are excluded. The import check shows the selected image source or the reason no verified image was accepted.
 
 Every structurally valid concert remains available in the import check. Its ticket price is editable, accepts a decimal point or comma, and must be reviewed before import:
 

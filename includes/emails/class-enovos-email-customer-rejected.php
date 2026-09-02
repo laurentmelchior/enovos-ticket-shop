@@ -6,6 +6,8 @@ if (!defined('ABSPATH')) {
 }
 
 final class EmailCustomerRejected extends \WC_Email {
+    public string $user_login = '';
+
     public function __construct() {
         $this->id = 'enovos_customer_rejected';
         $this->customer_email = true;
@@ -35,6 +37,7 @@ final class EmailCustomerRejected extends \WC_Email {
         $user = get_userdata($user_id);
         if ($user instanceof \WP_User) {
             $this->object = $user;
+            $this->user_login = $user->user_login;
             $this->recipient = $user->user_email;
             $this->placeholders['{customer_name}'] = $user->display_name;
             $this->placeholders['{customer_email}'] = $user->user_email;

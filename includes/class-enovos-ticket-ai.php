@@ -22,8 +22,9 @@ final class AI {
                         'price_per_ticket' => ['type' => 'number'],
                         'currency' => ['type' => 'string'],
                         'description' => ['type' => 'string'],
+                        'image_url' => ['type' => 'string'],
                     ],
-                    'required' => ['title','date','ticket_count','page_numbers','atelier_url','price_per_ticket','currency','description'],
+                    'required' => ['title','date','ticket_count','page_numbers','atelier_url','price_per_ticket','currency','description','image_url'],
                 ],
             ],
         ],
@@ -88,21 +89,25 @@ final class AI {
      * @param array<int,string> $excluded_image_urls
      */
     public static function enrich_atelier(array $event, array $settings, array $excluded_image_urls = []): array {
-        $candidate_url = esc_url_raw((string) ($event['atelier_url'] ?? ''));
         $title = (string) ($event['title'] ?? '');
         $date = (string) ($event['date'] ?? '');
-        Logger::log('STEP', 'Atelier enrichment started', ['title' => $title, 'url' => $candidate_url, 'date' => $date]);
+        $provider = self::selected_provider($settings);
+        $candidate_url = (string) ($event['atelier_url'] ?? '');
+        Logger::log('STEP', 'Atelier enrichment started', [
+            'title' => $title,
+            'url' => $candidate_url,
+            'date' => $date,
+        ]);
 
         $resolved = self::resolve_atelier_url($candidate_url, $title, $date);
-        if ($resolved['url'] === '') {
+        $url = $resolved['url'];
+        if ($url === '') {
             $event['atelier_url'] = '';
-            $event['image_url'] = '';
-            $event['image_source'] = 'atelier-date-not-matched';
             $event['_needs_review'] = 1;
             $event['_analysis_warning'] = sprintf(
-                'No Atelier page matches the ticket date %s%s.',
+                'No Atelier page matches the ticket date %s (%s).',
                 $date,
-                $resolved['reason'] !== '' ? ' (' . $resolved['reason'] . ')' : ''
+                $resolved['reason']
             );
             Logger::log('FAIL', 'No Atelier page matches the PDF ticket date', [
                 'title' => $title,
@@ -110,54 +115,132 @@ final class AI {
                 'candidate_url' => $candidate_url,
                 'reason' => $resolved['reason'],
             ]);
-            return $event;
         }
 
-        $url = $resolved['url'];
-        $event['atelier_url'] = $url;
-        $event['image_url'] = self::atelier_header_image($resolved['html'], $url, $excluded_image_urls);
-        $event['image_source'] = $event['image_url'] !== '' ? 'atelier-page-header' : 'atelier-page-image-missing';
-        if ($event['image_url'] !== '') {
-            Logger::log('OK', 'Official Atelier page header image found', ['url' => $event['image_url']]);
+        if ($url !== '') {
+            $page_image = self::atelier_header_image($resolved['html'], $url, $excluded_image_urls);
+            $page_image_reason = $page_image !== '' ? 'atelier-page-header' : 'atelier-header-image-missing';
+            if ($page_image !== '') {
+                $page_image = self::validate_image_url($page_image, $title, $excluded_image_urls);
+                if ($page_image === '') {
+                    $page_image_reason = 'atelier-image-download-validation-failed';
+                }
+            }
+
+            if ($provider === 'openai' && !empty($settings['openai_api_key'])) {
+                $r = self::openai_atelier($url, $settings, $event);
+                if (!is_wp_error($r)) {
+                    $event = array_merge($event, $r);
+                    Logger::log('OK', 'Atelier enrichment from OpenAI applied', ['title' => $title]);
+                } else {
+                    Logger::log('FAIL', 'OpenAI Atelier enrichment failed', ['error' => $r->get_error_message()]);
+                }
+            }
+
+            if ($provider === 'gemini' && !empty($settings['gemini_api_key'])) {
+                $r = self::gemini_atelier($url, $settings, $event);
+                if (!is_wp_error($r)) {
+                    $event = self::merge_best($event, $r);
+                    Logger::log('OK', 'Atelier data cross-checked with Gemini', ['title' => $title]);
+                } else {
+                    Logger::log('FAIL', 'Gemini Atelier enrichment failed', ['error' => $r->get_error_message()]);
+                }
+            }
+
+            // The AI may echo another concert URL; the date-verified page always wins.
+            $event['atelier_url'] = $url;
+
+            if ($page_image !== '') {
+                $event['image_url'] = $page_image;
+                $event['image_source'] = 'atelier-page';
+                unset($event['_image_warning']);
+                Logger::log('OK', 'Official Atelier page header image found', ['url' => $page_image]);
+            } else {
+                $event['_image_warning'] = $page_image_reason;
+                Logger::log('STEP', 'No verified Atelier artist/group image found', ['reason' => $page_image_reason]);
+            }
         } else {
-            Logger::log('STEP', 'No usable header image found on the date-matched Atelier page');
+            $event['_image_warning'] = 'No date-matched Atelier page; web artist image fallback required.';
         }
 
-        if (self::selected_provider($settings) === 'openai' && !empty($settings['openai_api_key'])) {
-            $r = self::openai_atelier($url, $settings, $event);
-            if (!is_wp_error($r)) {
-                foreach (['price_per_ticket', 'description'] as $field) {
-                    if (isset($r[$field]) && $r[$field] !== '') {
-                        $event[$field] = $r[$field];
-                    }
-                }
-                Logger::log('OK', 'Atelier enrichment from OpenAI applied', ['title' => $event['title'] ?? '']);
+        if (!empty($event['image_url']) && (($event['image_source'] ?? '') !== 'atelier-page')) {
+            $unvalidated_url = (string) $event['image_url'];
+            $validated = self::validate_image_url($unvalidated_url, $title, $excluded_image_urls);
+            if ($validated !== '') {
+                $event['image_url'] = $validated;
+                $event['image_source'] = 'ai-validated';
+                unset($event['_image_warning']);
+                Logger::log('OK', 'AI artist/group image URL validated', ['url' => $validated]);
             } else {
-                Logger::log('FAIL', 'OpenAI Atelier enrichment failed', ['error' => $r->get_error_message()]);
+                $event['image_url'] = '';
+                $event['_image_warning'] = 'AI image URL could not be downloaded or was not a unique image.';
+                Logger::log('FAIL', 'AI image URL could not be validated as a unique artist image', ['url' => $unvalidated_url]);
             }
         }
 
-        if (self::selected_provider($settings) === 'gemini' && !empty($settings['gemini_api_key'])) {
-            $r = self::gemini_atelier($url, $settings, $event);
-            if (!is_wp_error($r)) {
-                foreach (['price_per_ticket', 'description'] as $field) {
-                    if (isset($r[$field]) && $r[$field] !== '') {
-                        $event[$field] = $r[$field];
-                    }
+        if (
+            empty($event['image_url'])
+            && $provider === 'gemini'
+            && !empty($settings['gemini_api_key'])
+            && $title !== ''
+        ) {
+            $source = self::gemini_artist_image_source($event, $settings);
+            if (!is_wp_error($source) && !empty($source['source_page_url'])) {
+                $source_url = self::safe_source_page_url((string) $source['source_page_url']);
+                $web_image = $source_url !== ''
+                    ? self::extract_official_artist_image($source_url, $title, $excluded_image_urls)
+                    : ['url' => '', 'score' => 0, 'reason' => 'unsafe-source-page'];
+                $validated_web_image = $web_image['url'] !== ''
+                    ? self::validate_image_url($web_image['url'], $title, $excluded_image_urls)
+                    : '';
+                if ($validated_web_image !== '') {
+                    $event['image_url'] = $validated_web_image;
+                    $event['image_source'] = 'gemini-web-page';
+                    $event['image_source_url'] = $source_url;
+                    unset($event['_image_warning']);
+                    Logger::log('OK', 'Gemini web artist image found and validated', [
+                        'title' => $title,
+                        'source_url' => $source_url,
+                        'image_url' => $validated_web_image,
+                    ]);
+                } else {
+                    $event['_image_warning'] = 'Gemini found a source page, but no matching downloadable artist image.';
+                    Logger::log('FAIL', 'Gemini artist image source did not yield a valid image', [
+                        'title' => $title,
+                        'source_url' => $source_url,
+                        'reason' => $web_image['reason'],
+                    ]);
                 }
-                Logger::log('OK', 'Atelier data cross-checked with Gemini', ['title' => $event['title'] ?? '']);
             } else {
-                Logger::log('FAIL', 'Gemini Atelier enrichment failed', ['error' => $r->get_error_message()]);
+                $event['_image_warning'] = is_wp_error($source)
+                    ? $source->get_error_message()
+                    : 'Gemini did not find a verifiable artist image source page.';
+                Logger::log('FAIL', 'Gemini artist image web fallback failed', [
+                    'title' => $title,
+                    'error' => $event['_image_warning'],
+                ]);
             }
+        }
+
+        if (empty($event['image_url']) && empty($event['_image_warning'])) {
+            $event['_image_warning'] = 'No verified artist image found.';
         }
 
         return $event;
     }
 
     /**
+     * Accept an Atelier concert page only when its own date matches the PDF ticket date.
+     * Atelier keeps past shows on the same /shows/<slug>/ path, so an artist name alone
+     * can resolve to a concert from years ago.
+     *
      * @return array{url:string,html:string,date:string,reason:string}
      */
     private static function resolve_atelier_url(string $candidate_url, string $title, string $pdf_date): array {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $pdf_date)) {
+            return ['url' => '', 'html' => '', 'date' => '', 'reason' => 'ticket date missing'];
+        }
+
         $candidates = [];
         $candidate_url = self::official_atelier_url($candidate_url);
         if ($candidate_url !== '') {
@@ -165,25 +248,25 @@ final class AI {
         }
 
         $slug = sanitize_title($title);
-        if ($slug !== '' && preg_match('/^\d{4}-\d{2}-\d{2}$/', $pdf_date)) {
-            $year = substr($pdf_date, 0, 4);
-            $candidates[] = 'https://www.atelier.lu/shows/' . $slug . '-' . $year . '/';
+        if ($slug !== '') {
+            $candidates[] = 'https://www.atelier.lu/shows/' . $slug . '-' . substr($pdf_date, 0, 4) . '/';
             $candidates[] = 'https://www.atelier.lu/shows/' . $slug . '-2/';
         }
 
         $search = self::fetch_atelier_page('https://www.atelier.lu/?s=' . rawurlencode($title));
         if ($search['ok'] && preg_match_all('~href=["\']([^"\']*/shows/[^"\']+/?)["\']~i', $search['html'], $matches)) {
             foreach ($matches[1] as $match) {
-                $url = self::official_atelier_url(self::absolute_url('https://www.atelier.lu/', html_entity_decode((string) $match)));
+                $url = self::official_atelier_url(
+                    self::absolute_url('https://www.atelier.lu/', html_entity_decode((string) $match))
+                );
                 if ($url !== '') {
                     $candidates[] = $url;
                 }
             }
         }
 
-        $candidates = array_values(array_unique($candidates));
         $blocked = false;
-        foreach (array_slice($candidates, 0, 5) as $url) {
+        foreach (array_slice(array_values(array_unique($candidates)), 0, 5) as $url) {
             $page = self::fetch_atelier_page($url);
             $blocked = $blocked || $page['blocked'];
             if (!$page['ok']) {
@@ -200,8 +283,12 @@ final class AI {
             }
         }
 
-        $reason = $blocked ? 'Atelier blocked the page request with Cloudflare' : 'no exact date match';
-        return ['url' => '', 'html' => '', 'date' => '', 'reason' => $reason];
+        return [
+            'url' => '',
+            'html' => '',
+            'date' => '',
+            'reason' => $blocked ? 'Atelier blocked the page request with Cloudflare' : 'no exact date match',
+        ];
     }
 
     /**
@@ -260,9 +347,9 @@ final class AI {
     }
 
     private static function official_atelier_url(string $url): string {
-        $url = esc_url_raw(trim($url), ['https']);
+        $url = self::safe_source_page_url($url);
         $parts = wp_parse_url($url);
-        if (!is_array($parts) || ($parts['scheme'] ?? '') !== 'https') {
+        if (!is_array($parts)) {
             return '';
         }
         $host = strtolower((string) ($parts['host'] ?? ''));
@@ -270,8 +357,8 @@ final class AI {
             return '';
         }
         $path = (string) ($parts['path'] ?? '/');
-        $query = isset($parts['query']) ? '?' . $parts['query'] : '';
-        return 'https://www.atelier.lu' . ($path !== '' ? $path : '/') . $query;
+        return 'https://www.atelier.lu' . ($path !== '' ? $path : '/')
+            . (isset($parts['query']) ? '?' . $parts['query'] : '');
     }
 
     private static function atelier_page_date(string $html): string {
@@ -318,14 +405,11 @@ final class AI {
         return '';
     }
 
+    /**
+     * @param array<mixed> $node
+     */
     private static function json_ld_event_date(array $node): string {
-        $type = $node['@type'] ?? '';
-        $types = is_array($type) ? $type : [$type];
-        $is_event = count(array_filter(
-            $types,
-            static fn($item): bool => is_string($item) && str_ends_with(strtolower($item), 'event')
-        )) > 0;
-        if ($is_event && isset($node['startDate']) && is_string($node['startDate'])) {
+        if (self::json_ld_is_event($node) && isset($node['startDate']) && is_string($node['startDate'])) {
             return self::normalize_page_date($node['startDate']);
         }
         foreach ($node as $value) {
@@ -339,6 +423,19 @@ final class AI {
         return '';
     }
 
+    /**
+     * @param array<mixed> $node
+     */
+    private static function json_ld_is_event(array $node): bool {
+        $type = $node['@type'] ?? '';
+        foreach (is_array($type) ? $type : [$type] as $item) {
+            if (is_string($item) && str_ends_with(strtolower($item), 'event')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static function normalize_page_date(string $value): string {
         if (preg_match('/^(\d{4})-(\d{2})-(\d{2})/', trim($value), $match)) {
             return checkdate((int) $match[2], (int) $match[3], (int) $match[1])
@@ -346,6 +443,232 @@ final class AI {
                 : '';
         }
         return '';
+    }
+
+    /**
+     * Read the concert image straight from the page header instead of scoring filenames,
+     * because Atelier upload names rarely contain the artist name.
+     *
+     * @param array<int,string> $excluded_image_urls
+     */
+    private static function atelier_header_image(string $html, string $base_url, array $excluded_image_urls = []): string {
+        $dom = new \DOMDocument();
+        @$dom->loadHTML($html);
+        $candidates = [];
+        foreach (['og:image', 'twitter:image'] as $wanted) {
+            foreach ($dom->getElementsByTagName('meta') as $meta) {
+                $property = strtolower((string) ($meta->getAttribute('property') ?: $meta->getAttribute('name')));
+                if ($property === $wanted) {
+                    self::add_image_candidate($candidates, (string) $meta->getAttribute('content'), 'social-meta', '');
+                }
+            }
+        }
+        foreach ($dom->getElementsByTagName('script') as $script) {
+            if (strtolower(trim((string) $script->getAttribute('type'))) !== 'application/ld+json') {
+                continue;
+            }
+            $json = json_decode((string) $script->textContent, true);
+            if (is_array($json)) {
+                self::collect_json_ld_event_images($json, $candidates);
+            }
+        }
+
+        $hero_images = (new \DOMXPath($dom))->query(
+            '//*[contains(translate(@class,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"hero")'
+            . ' or contains(translate(@class,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"header")'
+            . ' or contains(translate(@class,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"banner")]//img'
+        );
+        if ($hero_images !== false) {
+            foreach ($hero_images as $img) {
+                if (!$img instanceof \DOMElement) {
+                    continue;
+                }
+                foreach (['src', 'data-src', 'data-lazy-src'] as $attribute) {
+                    self::add_image_candidate(
+                        $candidates,
+                        (string) $img->getAttribute($attribute),
+                        'hero-image',
+                        (string) $img->getAttribute('alt')
+                    );
+                }
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            $url = self::absolute_url($base_url, html_entity_decode($candidate['url']));
+            if (
+                $url !== ''
+                && self::is_likely_artist_image($url, '', $candidate['context'])
+                && !self::image_is_excluded($url, $excluded_image_urls)
+            ) {
+                return $url;
+            }
+        }
+        return '';
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param array<int,array{url:string,source:string,context:string}> $candidates
+     */
+    private static function collect_json_ld_event_images(array $node, array &$candidates): void {
+        if (self::json_ld_is_event($node) && isset($node['image'])) {
+            self::collect_json_ld_image_value($node['image'], (string) ($node['name'] ?? ''), $candidates);
+        }
+        foreach ($node as $value) {
+            if (is_array($value)) {
+                self::collect_json_ld_event_images($value, $candidates);
+            }
+        }
+    }
+
+    /**
+     * @return array{ok:bool,blocked:bool,status:int,date:string,image_url:string,error:string}
+     */
+    public static function atelier_page_diagnostic(string $url): array {
+        $page = self::fetch_atelier_page($url);
+        return [
+            'ok' => $page['ok'],
+            'blocked' => $page['blocked'],
+            'status' => $page['status'],
+            'date' => $page['ok'] ? self::atelier_page_date($page['html']) : '',
+            'image_url' => $page['ok'] ? self::atelier_header_image($page['html'], $url) : '',
+            'error' => $page['error'],
+        ];
+    }
+
+    /**
+     * @param array<int,string> $excluded_image_urls
+     * @return array{url:string,score:int,reason:string}
+     */
+    private static function extract_official_artist_image(string $url, string $title, array $excluded_image_urls): array {
+        $url = self::safe_source_page_url($url);
+        if ($url === '') {
+            return ['url' => '', 'score' => 0, 'reason' => 'unsafe-source-page'];
+        }
+        $response = wp_safe_remote_get($url, [
+            'timeout' => 30,
+            'redirection' => 5,
+            'headers' => ['User-Agent' => 'Enovos-Ticket-Shop/' . ENOVOS_TICKET_SHOP_VERSION . ' WordPress'],
+        ]);
+        if (is_wp_error($response)) {
+            Logger::log('FAIL', 'Could not fetch Atelier page for image extraction', ['error' => $response->get_error_message()]);
+            return ['url' => '', 'score' => 0, 'reason' => 'request-failed'];
+        }
+        $code = wp_remote_retrieve_response_code($response);
+        if ($code < 200 || $code >= 300) {
+            Logger::log('FAIL', 'Atelier page returned unexpected status for image extraction', ['status' => $code]);
+            return ['url' => '', 'score' => 0, 'reason' => 'unexpected-status'];
+        }
+        $html = wp_remote_retrieve_body($response);
+        if (!$html) {
+            return ['url' => '', 'score' => 0, 'reason' => 'empty-page'];
+        }
+
+        $candidates = [];
+        $page_context = self::page_identity_context($html);
+        if (preg_match_all('/<meta[^>]+(?:property|name)=[\"\'](?:og:image|twitter:image)[\"\'][^>]+content=[\"\']([^\"\']+)[\"\']/i', $html, $m)) {
+            foreach ($m[1] as $candidate) {
+                self::add_image_candidate($candidates, (string) $candidate, 'social-meta', $page_context);
+            }
+        }
+        if (preg_match_all('/<meta[^>]+content=[\"\']([^\"\']+)[\"\'][^>]+(?:property|name)=[\"\'](?:og:image|twitter:image)[\"\']/i', $html, $m2)) {
+            foreach ($m2[1] as $candidate) {
+                self::add_image_candidate($candidates, (string) $candidate, 'social-meta', $page_context);
+            }
+        }
+
+        $dom = new \DOMDocument();
+        @$dom->loadHTML($html);
+        foreach ($dom->getElementsByTagName('script') as $script) {
+            if (strtolower(trim((string) $script->getAttribute('type'))) !== 'application/ld+json') {
+                continue;
+            }
+            $json = json_decode((string) $script->textContent, true);
+            if (is_array($json)) {
+                self::collect_json_ld_images($json, $candidates);
+            }
+        }
+        foreach ($dom->getElementsByTagName('img') as $img) {
+            $context = implode(' ', [
+                (string) $img->getAttribute('alt'),
+                (string) $img->getAttribute('title'),
+            ]);
+            foreach (['src', 'data-src', 'data-lazy-src'] as $attribute) {
+                self::add_image_candidate($candidates, (string) $img->getAttribute($attribute), 'content-image', $context);
+            }
+        }
+
+        $ranked = [];
+        $rejected_count = 0;
+        foreach ($candidates as $candidate) {
+            $candidate_url = self::absolute_url($url, html_entity_decode($candidate['url']));
+            if ($candidate_url === '') {
+                continue;
+            }
+            [$score, $reason] = self::score_artist_image(
+                $candidate_url,
+                $title,
+                $candidate['source'],
+                $candidate['context'],
+                $excluded_image_urls
+            );
+            if ($score <= 0) {
+                if ($rejected_count < 10) {
+                    Logger::log('STEP', 'Atelier image candidate rejected', [
+                        'url' => $candidate_url,
+                        'reason' => $reason,
+                    ]);
+                }
+                $rejected_count++;
+                continue;
+            }
+            $ranked[] = ['url' => $candidate_url, 'score' => $score, 'reason' => $reason];
+        }
+        usort($ranked, static fn(array $left, array $right): int => $right['score'] <=> $left['score']);
+        return $ranked[0] ?? ['url' => '', 'score' => 0, 'reason' => 'no-title-match'];
+    }
+
+    private static function page_identity_context(string $html): string {
+        $context = [];
+        if (preg_match('/<title[^>]*>(.*?)<\/title>/is', $html, $title_match)) {
+            $context[] = wp_strip_all_tags(html_entity_decode((string) $title_match[1]));
+        }
+        foreach (['og:title', 'twitter:title'] as $property) {
+            $quoted_property = preg_quote($property, '/');
+            if (preg_match('/<meta[^>]+(?:property|name)=[\"\']' . $quoted_property . '[\"\'][^>]+content=[\"\']([^\"\']+)[\"\']/i', $html, $match)) {
+                $context[] = html_entity_decode((string) $match[1]);
+            }
+            if (preg_match('/<meta[^>]+content=[\"\']([^\"\']+)[\"\'][^>]+(?:property|name)=[\"\']' . $quoted_property . '[\"\']/i', $html, $match)) {
+                $context[] = html_entity_decode((string) $match[1]);
+            }
+        }
+        if (preg_match_all('/<script[^>]+type=[\"\']application\/ld\+json[\"\'][^>]*>(.*?)<\/script>/is', $html, $scripts)) {
+            foreach ($scripts[1] as $script) {
+                $json = json_decode((string) $script, true);
+                if (is_array($json)) {
+                    self::collect_json_ld_identity($json, $context);
+                }
+            }
+        }
+        return trim(implode(' ', array_unique(array_filter($context))));
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param array<int,string> $context
+     */
+    private static function collect_json_ld_identity(array $node, array &$context): void {
+        foreach (['name', 'headline', 'alternateName'] as $key) {
+            if (isset($node[$key]) && is_string($node[$key])) {
+                $context[] = $node[$key];
+            }
+        }
+        foreach ($node as $value) {
+            if (is_array($value)) {
+                self::collect_json_ld_identity($value, $context);
+            }
+        }
     }
 
     /**
@@ -361,6 +684,29 @@ final class AI {
             'source' => $source,
             'context' => trim($context),
         ];
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param array<int,array{url:string,source:string,context:string}> $candidates
+     */
+    private static function collect_json_ld_images(array $node, array &$candidates): void {
+        $context_parts = [];
+        foreach (['name', 'headline', 'alternateName'] as $context_key) {
+            if (isset($node[$context_key]) && is_string($node[$context_key])) {
+                $context_parts[] = $node[$context_key];
+            }
+        }
+        $context = implode(' ', $context_parts);
+
+        foreach ($node as $key => $value) {
+            if (in_array(strtolower((string) $key), ['image', 'thumbnailurl'], true)) {
+                self::collect_json_ld_image_value($value, $context, $candidates);
+            }
+            if (is_array($value)) {
+                self::collect_json_ld_images($value, $candidates);
+            }
+        }
     }
 
     /**
@@ -390,97 +736,81 @@ final class AI {
 
     /**
      * @param array<int,string> $excluded_image_urls
+     * @return array{0:int,1:string}
      */
-    private static function atelier_header_image(string $html, string $base_url, array $excluded_image_urls = []): string {
-        $dom = new \DOMDocument();
-        @$dom->loadHTML($html);
-        $candidates = [];
-        foreach (['og:image', 'twitter:image'] as $wanted) {
-            foreach ($dom->getElementsByTagName('meta') as $meta) {
-                $property = strtolower((string) ($meta->getAttribute('property') ?: $meta->getAttribute('name')));
-                if ($property === $wanted) {
-                    self::add_image_candidate($candidates, (string) $meta->getAttribute('content'), 'social-meta', '');
-                }
-            }
+    private static function score_artist_image(
+        string $url,
+        string $title,
+        string $source,
+        string $context,
+        array $excluded_image_urls
+    ): array {
+        if (self::image_is_excluded($url, $excluded_image_urls)) {
+            return [0, 'already-used-by-another-concert'];
         }
-        foreach ($dom->getElementsByTagName('script') as $script) {
-            if (strtolower(trim((string) $script->getAttribute('type'))) !== 'application/ld+json') {
-                continue;
-            }
-            $json = json_decode((string) $script->textContent, true);
-            if (is_array($json)) {
-                self::collect_json_ld_event_images($json, $candidates);
-            }
+        if (!self::is_likely_artist_image($url, $title, $context)) {
+            return [0, 'generic-or-non-artist-image'];
         }
 
-        $xpath = new \DOMXPath($dom);
-        $hero_images = $xpath->query(
-            '//*[contains(translate(@class,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"hero")'
-            . ' or contains(translate(@class,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"header")'
-            . ' or contains(translate(@class,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"),"banner")]//img'
-        );
-        if ($hero_images !== false) {
-            foreach ($hero_images as $img) {
-                if (!$img instanceof \DOMElement) {
-                    continue;
-                }
-                foreach (['src', 'data-src', 'data-lazy-src'] as $attribute) {
-                    self::add_image_candidate(
-                        $candidates,
-                        (string) $img->getAttribute($attribute),
-                        'hero-image',
-                        (string) $img->getAttribute('alt')
-                    );
-                }
-            }
+        $tokens = self::artist_title_tokens($title);
+        $normalized_url = self::normalize_image_text(rawurldecode($url));
+        $normalized_context = self::normalize_image_text($context);
+        $url_matches = 0;
+        $context_matches = 0;
+        foreach ($tokens as $token) {
+            $url_matches += self::image_text_contains_token($normalized_url, $token) ? 1 : 0;
+            $context_matches += self::image_text_contains_token($normalized_context, $token) ? 1 : 0;
+        }
+        if ($url_matches + $context_matches === 0) {
+            return [0, 'no-artist-title-match'];
         }
 
-        foreach ($candidates as $candidate) {
-            $url = self::absolute_url($base_url, html_entity_decode($candidate['url']));
-            if (
-                $url !== ''
-                && self::is_usable_atelier_image($url, $candidate['context'])
-                && !self::image_is_excluded($url, $excluded_image_urls)
-            ) {
-                return $url;
-            }
-        }
-        return '';
-    }
-
-    /**
-     * @param array<int,array{url:string,source:string,context:string}> $candidates
-     */
-    private static function collect_json_ld_event_images(array $node, array &$candidates): void {
-        $type = $node['@type'] ?? '';
-        $types = is_array($type) ? $type : [$type];
-        $is_event = count(array_filter(
-            $types,
-            static fn($item): bool => is_string($item) && str_ends_with(strtolower($item), 'event')
-        )) > 0;
-        if ($is_event && isset($node['image'])) {
-            self::collect_json_ld_image_value($node['image'], (string) ($node['name'] ?? ''), $candidates);
-        }
-        foreach ($node as $value) {
-            if (is_array($value)) {
-                self::collect_json_ld_event_images($value, $candidates);
-            }
-        }
-    }
-
-    /**
-     * @return array{ok:bool,blocked:bool,status:int,date:string,image_url:string,error:string}
-     */
-    public static function atelier_page_diagnostic(string $url): array {
-        $page = self::fetch_atelier_page($url);
+        $source_score = [
+            'json-ld' => 35,
+            'social-meta' => 25,
+            'content-image' => 15,
+        ][$source] ?? 0;
+        $score = $source_score + ($url_matches * 25) + ($context_matches * 15);
         return [
-            'ok' => $page['ok'],
-            'blocked' => $page['blocked'],
-            'status' => $page['status'],
-            'date' => $page['ok'] ? self::atelier_page_date($page['html']) : '',
-            'image_url' => $page['ok'] ? self::atelier_header_image($page['html'], $url) : '',
-            'error' => $page['error'],
+            $score,
+            sprintf('%s; %d URL and %d context title-token matches', $source, $url_matches, $context_matches),
         ];
+    }
+
+    /**
+     * @param array<int,string> $excluded_image_urls
+     */
+    private static function validate_image_url(string $url, string $title, array $excluded_image_urls = []): string {
+        $url = self::safe_source_page_url($url);
+        if (!$url || !self::is_likely_artist_image($url, $title) || self::image_is_excluded($url, $excluded_image_urls)) {
+            return '';
+        }
+        $response = wp_safe_remote_head($url, [
+            'timeout' => 20,
+            'redirection' => 5,
+            'headers' => ['User-Agent' => 'Enovos-Ticket-Shop/' . ENOVOS_TICKET_SHOP_VERSION . ' WordPress'],
+        ]);
+        if (!self::remote_response_is_image($response)) {
+            $response = wp_safe_remote_get($url, [
+                'timeout' => 20,
+                'redirection' => 5,
+                'limit_response_size' => 65536,
+                'headers' => ['User-Agent' => 'Enovos-Ticket-Shop/' . ENOVOS_TICKET_SHOP_VERSION . ' WordPress'],
+            ]);
+        }
+        return self::remote_response_is_image($response) ? $url : '';
+    }
+
+    /**
+     * @param array<string,mixed>|\WP_Error $response
+     */
+    private static function remote_response_is_image($response): bool {
+        if (is_wp_error($response)) {
+            return false;
+        }
+        $code = wp_remote_retrieve_response_code($response);
+        $type = strtolower((string) wp_remote_retrieve_header($response, 'content-type'));
+        return $code >= 200 && $code < 300 && str_starts_with($type, 'image/');
     }
 
     private static function absolute_url(string $base, string $url): string {
@@ -506,6 +836,15 @@ final class AI {
         return esc_url_raw($origin . '/' . ltrim($path . '/' . $url, '/'));
     }
 
+    private static function safe_source_page_url(string $url): string {
+        $url = esc_url_raw(trim($url));
+        if ($url === '' || strtolower((string) wp_parse_url($url, PHP_URL_SCHEME)) !== 'https') {
+            return '';
+        }
+        $validated = wp_http_validate_url($url);
+        return is_string($validated) ? $validated : '';
+    }
+
     public static function image_key(string $url): string {
         $parts = wp_parse_url(html_entity_decode($url));
         if (!is_array($parts) || empty($parts['host']) || empty($parts['path'])) {
@@ -527,18 +866,47 @@ final class AI {
         return false;
     }
 
-    private static function is_usable_atelier_image(string $url, string $context = ''): bool {
+    private static function is_likely_artist_image(string $url, string $title, string $context = ''): bool {
+        unset($title);
         $lower = strtolower(rawurldecode($url . ' ' . $context));
         foreach ([
             'logo', 'sponsor', 'footer', 'cookie', 'icon', 'avatar',
             'ticket', 'qr', 'barcode', 'map',
-            'placeholder', 'default-image', 'default_image', 'sponsors-banner',
+            'placeholder', 'default-image', 'default_image',
         ] as $bad) {
             if (str_contains($lower, $bad)) {
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * @return array<int,string>
+     */
+    private static function artist_title_tokens(string $title): array {
+        $normalized = self::normalize_image_text($title);
+        $stop_words = [
+            'and', 'at', 'avec', 'concert', 'den', 'feat', 'featuring', 'live',
+            'luxembourg', 'presents', 'the', 'tour', 'with',
+        ];
+        $tokens = array_values(array_unique(array_filter(
+            preg_split('/[^a-z0-9]+/', $normalized) ?: [],
+            static fn(string $token): bool => strlen($token) >= 2
+        )));
+        $meaningful_tokens = array_values(array_filter(
+            $tokens,
+            static fn(string $token): bool => !in_array($token, $stop_words, true)
+        ));
+        return $meaningful_tokens;
+    }
+
+    private static function normalize_image_text(string $value): string {
+        return strtolower(remove_accents($value));
+    }
+
+    private static function image_text_contains_token(string $text, string $token): bool {
+        return preg_match('/(?:^|[^a-z0-9])' . preg_quote($token, '/') . '(?:$|[^a-z0-9])/', $text) === 1;
     }
 
     private static function prompt(array $pdf_analysis = []): string {
@@ -574,7 +942,7 @@ Rules:
 - On that Atelier concert page, determine the current public ticket price for one ticket.
 - Use the direct Atelier concert URL.
 - Extract a concise group/concert description from Atelier.
-- Do not search for or return an image URL. Product images are read directly from the date-matched Atelier page.
+- Extract a direct public image URL showing the artist or group (preferred), not a ticket graphic, sponsor logo, venue logo, or generic concert poster. Prefer the official Atelier artist/group image when available; otherwise use a credible artist press photo or official artist image.
 - Date format must be YYYY-MM-DD.
 - price_per_ticket is numeric only. Currency should be EUR where applicable.
 - Do not invent data. If a field cannot be found, use an empty string or 0 only when the schema requires it. Never use the PDF ticket image as the product image.
@@ -658,8 +1026,9 @@ TXT;
                             'price_per_ticket' => ['type' => 'number'],
                             'currency' => ['type' => 'string'],
                             'description' => ['type' => 'string'],
+                            'image_url' => ['type' => 'string'],
                         ],
-                        'required' => ['title','date','ticket_count','page_numbers','atelier_url','price_per_ticket','currency','description'],
+                        'required' => ['title','date','ticket_count','page_numbers','atelier_url','price_per_ticket','currency','description','image_url'],
                     ],
                 ],
             ],
@@ -785,8 +1154,10 @@ TXT;
                         'properties' => [
                             'price_per_ticket' => ['type' => 'number'],
                             'description' => ['type' => 'string'],
+                            'image_url' => ['type' => 'string'],
+                            'atelier_url' => ['type' => 'string'],
                         ],
-                        'required' => ['price_per_ticket','description'],
+                        'required' => ['price_per_ticket','description','image_url','atelier_url'],
                         'additionalProperties' => false,
                     ],
                 ],
@@ -829,8 +1200,10 @@ TXT;
                     'properties' => [
                         'price_per_ticket' => ['type' => 'number'],
                         'description' => ['type' => 'string'],
+                        'image_url' => ['type' => 'string'],
+                        'atelier_url' => ['type' => 'string'],
                     ],
-                    'required' => ['price_per_ticket','description'],
+                    'required' => ['price_per_ticket','description','image_url','atelier_url'],
                 ],
             ],
         ];
@@ -870,9 +1243,86 @@ TXT;
         return $json;
     }
 
+    private static function gemini_artist_image_source(array $event, array $settings): array|\WP_Error {
+        $title = trim((string) ($event['title'] ?? ''));
+        $date = trim((string) ($event['date'] ?? ''));
+        $prompt = sprintf(
+            'Find a public HTTPS page with an official artist or group press photo for "%s"%s. '
+            . 'Use the official artist website, record label, management, or a dedicated artist profile or interview from a reputable press publication. '
+            . 'The page title or metadata must clearly identify the exact artist or group. '
+            . 'Do not return an event organizer, venue, event listing, image-search result, social network, ticket graphic, logo, poster, or generic event image. '
+            . 'Return the source web page URL, not a guessed direct image URL.',
+            $title,
+            $date !== '' ? ' (concert date ' . $date . ')' : ''
+        );
+        $body = [
+            'contents' => [['parts' => [['text' => $prompt]]]],
+            'tools' => [['google_search' => new \stdClass()]],
+            'generationConfig' => [
+                'responseMimeType' => 'application/json',
+                'responseSchema' => [
+                    'type' => 'object',
+                    'properties' => [
+                        'source_page_url' => ['type' => 'string'],
+                        'source_type' => [
+                            'type' => 'string',
+                            'enum' => ['artist', 'label', 'management', 'press'],
+                        ],
+                        'evidence' => ['type' => 'string'],
+                    ],
+                    'required' => ['source_page_url', 'source_type', 'evidence'],
+                ],
+            ],
+        ];
+        $model = trim($settings['gemini_model'] ?: 'gemini-3.6-flash');
+        $endpoint = 'https://generativelanguage.googleapis.com/v1beta/models/' . rawurlencode($model) . ':generateContent';
+        $response = wp_remote_post($endpoint, [
+            'timeout' => 120,
+            'headers' => [
+                'Content-Type' => 'application/json',
+                'x-goog-api-key' => trim($settings['gemini_api_key']),
+            ],
+            'body' => wp_json_encode($body),
+        ]);
+        if (is_wp_error($response)) {
+            return $response;
+        }
+        $code = wp_remote_retrieve_response_code($response);
+        $data = json_decode(wp_remote_retrieve_body($response), true);
+        if ($code < 200 || $code >= 300 || !is_array($data)) {
+            Logger::log('FAIL', 'Gemini artist image search HTTP/API error', [
+                'status' => $code,
+                'model' => $model,
+            ]);
+            return new \WP_Error('gemini_artist_image_response', 'Gemini artist image search failed.');
+        }
+        $text = '';
+        foreach (($data['candidates'][0]['content']['parts'] ?? []) as $part) {
+            $text .= $part['text'] ?? '';
+        }
+        if ($text === '') {
+            Logger::log('FAIL', 'Gemini artist image search returned no content', [
+                'finish_reason' => (string) ($data['candidates'][0]['finishReason'] ?? ''),
+                'block_reason' => (string) ($data['promptFeedback']['blockReason'] ?? ''),
+            ]);
+        }
+        $result = json_decode(trim($text), true);
+        if (
+            !is_array($result)
+            || empty($result['source_page_url'])
+            || !in_array((string) ($result['source_type'] ?? ''), ['artist', 'label', 'management', 'press'], true)
+        ) {
+            return new \WP_Error('gemini_artist_image_json', 'Gemini did not return an artist image source page.');
+        }
+        if (self::safe_source_page_url((string) $result['source_page_url']) === '') {
+            return new \WP_Error('gemini_artist_image_unsafe_url', 'Gemini returned an unsafe artist image source page.');
+        }
+        return $result;
+    }
+
     private static function atelier_prompt(string $url, array $event): string {
         return sprintf(
-            "Use this date-verified official Atelier Luxembourg concert page for %s on %s: %s. Return JSON with the current public ticket price for ONE ticket in EUR and a concise description based on Atelier. Do not return an image or another event URL. The PDF price must never be used. The price must be current and match the exact event title and date. Never guess or infer a price from unrelated events. If the exact price cannot be verified from the official Atelier event page or its official ticketing page, return an empty/unknown price. The administrator can review a broader web suggestion or enter the price manually.",
+            "Find and verify the official Atelier Luxembourg concert page for %s on %s. Candidate URL: %s. Return JSON with the current public ticket price for ONE ticket in EUR, a concise description based on Atelier, the main image URL, and the exact official Atelier concert URL. The PDF price must never be used. The price must be current and match the exact event title and date. Never guess or infer a price from unrelated events. If the exact price cannot be verified from the official Atelier event page or the official ticketing page reached from it, return an empty/unknown price. The administrator can review a broader web suggestion or enter the price manually.",
             $event['title'] ?? '',
             $event['date'] ?? '',
             $url
@@ -1447,8 +1897,7 @@ TXT;
         unset($event['price_source'], $event['price_verified'], $event['price_verification_method']);
         $event['currency'] = strtoupper(trim((string)($event['currency'] ?? 'EUR')));
         $event['description'] = wp_kses_post((string)($event['description'] ?? ''));
-        // Product images are accepted only from a date-matched Atelier page during enrichment.
-        $event['image_url'] = '';
+        $event['image_url'] = esc_url_raw((string)($event['image_url'] ?? ''));
         return $event;
     }
 
@@ -1528,4 +1977,13 @@ TXT;
         return $final;
     }
 
+    private static function merge_best(array $base, array $extra): array {
+        foreach (['description','image_url','atelier_url'] as $field) {
+            if (!empty($extra[$field])) {
+                $base[$field] = $extra[$field];
+            }
+        }
+        // A price from enrichment is only accepted after verify_atelier_price().
+        return $base;
+    }
 }
