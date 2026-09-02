@@ -1,5 +1,11 @@
 # Changelog
 
+## Version 0.7.1 – 2026-09-02
+- Added a reliable post-registration confirmation banner on the WooCommerce My Account page.
+- Added Customer status to WordPress Users with Email not confirmed, Pending, Approved and Rejected states.
+- Ticket Inventory now displays the formatted WooCommerce order number supplied by custom order-number plugins.
+- Artist images are ranked against each concert title, generic Atelier images are rejected, and one image cannot be reused for different concerts in the same import.
+
 ## Version 0.7.0 – 2026-09-02
 - Fixed Attach Me! customer visibility so ticket PDFs remain hidden until the configured delivery status.
 - Kept Completed tickets visible after a Processing delivery configuration advances to Completed.

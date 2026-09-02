@@ -9,12 +9,13 @@ final class Importer {
     public static function build_products(array $events, array $settings): array {
         $created = [];
         $errors = [];
+        $used_image_urls = [];
 
         foreach ($events as $event) {
             Logger::log('START', 'Processing event', ['title' => $event['title'] ?? '']);
             $price_accepted = !empty($event['price_verified']) || !empty($event['price_approved']);
             if (!$price_accepted || (float)($event['price_per_ticket'] ?? 0) <= 0) {
-                $event = AI::enrich_atelier($event, $settings);
+                $event = AI::enrich_atelier($event, $settings, array_keys($used_image_urls));
                 Logger::log('STEP', 'Atelier data received', ['title' => $event['title'] ?? '', 'price' => $event['price_per_ticket'] ?? 0]);
                 $price_verification = AI::verify_atelier_price($event, $settings);
                 if (is_wp_error($price_verification)) {
@@ -32,6 +33,20 @@ final class Importer {
                     'price' => $event['price_per_ticket'] ?? 0,
                     'method' => $event['price_verification_method'] ?? '',
                 ]);
+            }
+            if (!empty($event['image_url'])) {
+                $image_key = AI::image_key((string) $event['image_url']);
+                if (isset($used_image_urls[$image_key])) {
+                    Logger::log('FAIL', 'Duplicate concert image rejected during product import', [
+                        'title' => $event['title'] ?? '',
+                        'url' => $event['image_url'],
+                        'already_used_by' => $used_image_urls[$image_key],
+                    ]);
+                    $event['image_url'] = '';
+                    $event['image_source'] = 'rejected-duplicate';
+                } else {
+                    $used_image_urls[$image_key] = (string) ($event['title'] ?? '');
+                }
             }
             $event['price_per_ticket'] = AI::round_price_up((float) ($event['price_per_ticket'] ?? 0));
             Logger::log('OK', 'Reviewed ticket price applied to event after upward rounding', [
