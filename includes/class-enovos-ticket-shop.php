@@ -332,6 +332,9 @@ final class Plugin {
             if (empty($event['atelier_url'])) $warnings[] = 'Atelier URL missing';
             if (!empty($event['_analysis_warning'])) $warnings[] = (string) $event['_analysis_warning'];
             if (!empty($event['_price_warning'])) $warnings[] = (string) $event['_price_warning'];
+            $image_status = !empty($event['image_url'])
+                ? '<span style="color:green">Found</span><br><small>' . esc_html((string) ($event['image_source'] ?? 'verified')) . '</small>'
+                : '<span style="color:#996800">Missing</span><br><small>' . esc_html((string) ($event['_image_warning'] ?? 'No verified artist image found.')) . '</small>';
             echo '<tr>';
             echo '<td><input type="checkbox" class="enovos-import-check" name="selected_events[]" value="' . esc_attr($key) . '" ' . checked($structurally_valid && !empty($event['price_verified']) && $price > 0 && $auto_select, true, false) . ' ' . disabled($structurally_valid, false, false) . '></td>';
             echo '<td><strong>' . esc_html($event['title'] ?? '') . '</strong></td>';
@@ -345,7 +348,7 @@ final class Plugin {
             }
             echo '</td>';
             echo '<td>' . (!empty($event['atelier_url']) ? '<a target="_blank" rel="noopener" href="' . esc_url($event['atelier_url']) . '">Open</a>' : 'Missing') . '</td>';
-            echo '<td>' . (!empty($event['image_url']) ? '<span style="color:green">Found</span>' : '<span style="color:#996800">Missing</span>') . '</td>';
+            echo '<td>' . $image_status . '</td>';
             echo '<td><span style="font-weight:600">' . esc_html($status) . '</span></td>';
             echo '<td>' . esc_html(!$structurally_valid ? $blocked_reason : ($warnings ? implode(', ', $warnings) : '—')) . '</td>';
             echo '</tr>';
@@ -823,6 +826,7 @@ final class Plugin {
                     ]);
                     $event['image_url'] = '';
                     $event['image_source'] = 'rejected-duplicate';
+                    $event['_image_warning'] = 'The same image was already assigned to another concert in this import.';
                 } else {
                     $used_image_urls[$image_key] = (string) ($event['title'] ?? '');
                 }
