@@ -411,10 +411,19 @@ final class Plugin {
         if (!$rows) {
             echo '<tr><td colspan="14"><em>No ticket packages yet.</em></td></tr>';
         }
+        $order_numbers = [];
         foreach ($rows as $row) {
             $package_id = (int) $row['id'];
+            $order_id = (int) $row['order_id'];
             $product_link = $row['product_id'] ? admin_url('post.php?post=' . (int) $row['product_id'] . '&action=edit') : '';
-            $order_link = $row['order_id'] ? admin_url('admin.php?page=wc-orders&action=edit&id=' . (int) $row['order_id']) : '';
+            $order_link = $order_id > 0 ? admin_url('admin.php?page=wc-orders&action=edit&id=' . $order_id) : '';
+            if ($order_id > 0 && !isset($order_numbers[$order_id])) {
+                $order = wc_get_order($order_id);
+                $order_numbers[$order_id] = $order instanceof \WC_Order
+                    ? $order->get_order_number()
+                    : (string) $order_id;
+            }
+            $order_number = $order_id > 0 ? $order_numbers[$order_id] : '';
             $size_label = '—';
             $can_download = !empty($row['pdf_path']) && is_readable($row['pdf_path']);
             if ($can_download) {
@@ -446,7 +455,7 @@ final class Plugin {
             echo '<td>' . esc_html($size_label) . '</td>';
             echo '<td><strong>' . esc_html($row['status']) . '</strong></td>';
             echo '<td>' . ($product_link ? '<a href="' . esc_url($product_link) . '">#' . esc_html((string) $row['product_id']) . '</a>' : '—') . '</td>';
-            echo '<td>' . ($order_link ? '<a href="' . esc_url($order_link) . '">#' . esc_html((string) $row['order_id']) . '</a>' : '—') . '</td>';
+            echo '<td>' . ($order_link ? '<a href="' . esc_url($order_link) . '">' . esc_html($order_number) . '</a>' : '—') . '</td>';
             echo '<td>' . esc_html($row['reserved_at'] ?: '—') . '</td>';
             echo '<td>' . esc_html($row['delivered_at'] ?: '—') . '</td>';
             echo '<td>';
