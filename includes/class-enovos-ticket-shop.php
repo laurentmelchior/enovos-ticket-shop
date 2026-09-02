@@ -808,9 +808,24 @@ final class Plugin {
 
         $enriched = [];
         $price_errors = [];
+        $used_image_urls = [];
         foreach (($result['consensus'] ?? []) as $event) {
             if (!empty($settings['enable_atelier_enrichment'])) {
-                $event = AI::enrich_atelier($event, $settings);
+                $event = AI::enrich_atelier($event, $settings, array_keys($used_image_urls));
+            }
+            if (!empty($event['image_url'])) {
+                $image_key = AI::image_key((string) $event['image_url']);
+                if (isset($used_image_urls[$image_key])) {
+                    Logger::log('FAIL', 'Duplicate concert image rejected during analysis', [
+                        'title' => $event['title'] ?? '',
+                        'url' => $event['image_url'],
+                        'already_used_by' => $used_image_urls[$image_key],
+                    ]);
+                    $event['image_url'] = '';
+                    $event['image_source'] = 'rejected-duplicate';
+                } else {
+                    $used_image_urls[$image_key] = (string) ($event['title'] ?? '');
+                }
             }
             $verified = AI::verify_atelier_price($event, $settings);
             if (is_wp_error($verified)) {

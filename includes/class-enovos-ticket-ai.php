@@ -85,30 +85,39 @@ final class AI {
         return in_array($provider, ['openai','gemini','custom'], true) ? $provider : 'openai';
     }
 
-    public static function enrich_atelier(array $event, array $settings): array {
+    /**
+     * @param array<int,string> $excluded_image_urls
+     */
+    public static function enrich_atelier(array $event, array $settings, array $excluded_image_urls = []): array {
         $url = esc_url_raw($event['atelier_url'] ?? '');
         Logger::log('STEP', 'Atelier enrichment started', ['title' => $event['title'] ?? '', 'url' => $url]);
         if (!$url) {
             return $event;
         }
 
-        // First, extract the official page image directly. This is more reliable than asking an AI to
-        // return a URL that may actually point to a web page instead of an image file.
-        $page_image = self::extract_official_artist_image($url, (string) ($event['title'] ?? ''));
-        if ($page_image) {
-            $event['image_url'] = $page_image;
+        $page_image = self::extract_official_artist_image(
+            $url,
+            (string) ($event['title'] ?? ''),
+            $excluded_image_urls
+        );
+        if ($page_image['url'] !== '') {
+            $event['image_url'] = $page_image['url'];
             $event['image_source'] = 'atelier-page';
-            Logger::log('OK', 'Official Atelier artist/group image found', ['url' => $page_image]);
+            Logger::log('OK', 'Official Atelier artist/group image found', [
+                'url' => $page_image['url'],
+                'score' => $page_image['score'],
+                'reason' => $page_image['reason'],
+            ]);
         } else {
-            Logger::log('STEP', 'No official Atelier artist/group image found in page metadata');
+            Logger::log('STEP', 'No title-matched Atelier artist/group image found');
         }
 
         if (self::selected_provider($settings) === 'openai' && !empty($settings['openai_api_key'])) {
             $r = self::openai_atelier($url, $settings, $event);
             if (!is_wp_error($r)) {
                 $event = array_merge($event, $r);
-                if ($page_image) {
-                    $event['image_url'] = $page_image;
+                if ($page_image['url'] !== '') {
+                    $event['image_url'] = $page_image['url'];
                     $event['image_source'] = 'atelier-page';
                 }
                 Logger::log('OK', 'Atelier enrichment from OpenAI applied', ['title' => $event['title'] ?? '']);
@@ -121,8 +130,8 @@ final class AI {
             $r = self::gemini_atelier($url, $settings, $event);
             if (!is_wp_error($r)) {
                 $event = self::merge_best($event, $r);
-                if ($page_image) {
-                    $event['image_url'] = $page_image;
+                if ($page_image['url'] !== '') {
+                    $event['image_url'] = $page_image['url'];
                     $event['image_source'] = 'atelier-page';
                 }
                 Logger::log('OK', 'Atelier data cross-checked with Gemini', ['title' => $event['title'] ?? '']);
@@ -131,23 +140,32 @@ final class AI {
             }
         }
 
-        // If the official page did not expose an image, validate the AI-provided URL and reject page URLs.
+        // A generic page image never wins over a validated artist image returned by the selected AI.
         if (!empty($event['image_url']) && (($event['image_source'] ?? '') !== 'atelier-page')) {
-            $validated = self::validate_image_url((string) $event['image_url'], (string) ($event['title'] ?? ''));
+            $unvalidated_url = (string) $event['image_url'];
+            $validated = self::validate_image_url(
+                $unvalidated_url,
+                (string) ($event['title'] ?? ''),
+                $excluded_image_urls
+            );
             if ($validated) {
                 $event['image_url'] = $validated;
                 $event['image_source'] = 'ai-validated';
                 Logger::log('OK', 'AI artist/group image URL validated', ['url' => $validated]);
             } else {
                 $event['image_url'] = '';
-                Logger::log('FAIL', 'AI image URL could not be validated as an image', ['url' => (string) ($event['image_url'] ?? '')]);
+                Logger::log('FAIL', 'AI image URL could not be validated as a unique artist image', ['url' => $unvalidated_url]);
             }
         }
 
         return $event;
     }
 
-    private static function extract_official_artist_image(string $url, string $title): string {
+    /**
+     * @param array<int,string> $excluded_image_urls
+     * @return array{url:string,score:int,reason:string}
+     */
+    private static function extract_official_artist_image(string $url, string $title, array $excluded_image_urls): array {
         $response = wp_remote_get($url, [
             'timeout' => 30,
             'redirection' => 5,
@@ -155,50 +173,192 @@ final class AI {
         ]);
         if (is_wp_error($response)) {
             Logger::log('FAIL', 'Could not fetch Atelier page for image extraction', ['error' => $response->get_error_message()]);
-            return '';
+            return ['url' => '', 'score' => 0, 'reason' => 'request-failed'];
         }
         $code = wp_remote_retrieve_response_code($response);
         if ($code < 200 || $code >= 300) {
             Logger::log('FAIL', 'Atelier page returned unexpected status for image extraction', ['status' => $code]);
-            return '';
+            return ['url' => '', 'score' => 0, 'reason' => 'unexpected-status'];
         }
         $html = wp_remote_retrieve_body($response);
         if (!$html) {
-            return '';
+            return ['url' => '', 'score' => 0, 'reason' => 'empty-page'];
         }
 
         $candidates = [];
         if (preg_match_all('/<meta[^>]+(?:property|name)=[\"\'](?:og:image|twitter:image)[\"\'][^>]+content=[\"\']([^\"\']+)[\"\']/i', $html, $m)) {
-            $candidates = array_merge($candidates, $m[1]);
+            foreach ($m[1] as $candidate) {
+                self::add_image_candidate($candidates, (string) $candidate, 'social-meta', '');
+            }
         }
         if (preg_match_all('/<meta[^>]+content=[\"\']([^\"\']+)[\"\'][^>]+(?:property|name)=[\"\'](?:og:image|twitter:image)[\"\']/i', $html, $m2)) {
-            $candidates = array_merge($candidates, $m2[1]);
+            foreach ($m2[1] as $candidate) {
+                self::add_image_candidate($candidates, (string) $candidate, 'social-meta', '');
+            }
         }
 
         $dom = new \DOMDocument();
         @$dom->loadHTML($html);
-        foreach ($dom->getElementsByTagName('img') as $img) {
-            $src = trim((string) $img->getAttribute('src'));
-            if ($src !== '') {
-                $candidates[] = $src;
-            }
-        }
-
-        foreach ($candidates as $candidate) {
-            $candidate = self::absolute_url($url, html_entity_decode((string) $candidate));
-            if (!$candidate) {
+        foreach ($dom->getElementsByTagName('script') as $script) {
+            if (strtolower(trim((string) $script->getAttribute('type'))) !== 'application/ld+json') {
                 continue;
             }
-            if (self::is_likely_artist_image($candidate, $title)) {
-                return $candidate;
+            $json = json_decode((string) $script->textContent, true);
+            if (is_array($json)) {
+                self::collect_json_ld_images($json, $candidates);
             }
         }
-        return '';
+        foreach ($dom->getElementsByTagName('img') as $img) {
+            $context = implode(' ', [
+                (string) $img->getAttribute('alt'),
+                (string) $img->getAttribute('title'),
+                (string) $img->getAttribute('class'),
+                (string) $img->getAttribute('id'),
+                $img->parentNode instanceof \DOMElement ? (string) $img->parentNode->getAttribute('class') : '',
+            ]);
+            foreach (['src', 'data-src', 'data-lazy-src'] as $attribute) {
+                self::add_image_candidate($candidates, (string) $img->getAttribute($attribute), 'content-image', $context);
+            }
+        }
+
+        $ranked = [];
+        $rejected_count = 0;
+        foreach ($candidates as $candidate) {
+            $candidate_url = self::absolute_url($url, html_entity_decode($candidate['url']));
+            if ($candidate_url === '') {
+                continue;
+            }
+            [$score, $reason] = self::score_artist_image(
+                $candidate_url,
+                $title,
+                $candidate['source'],
+                $candidate['context'],
+                $excluded_image_urls
+            );
+            if ($score <= 0) {
+                if ($rejected_count < 10) {
+                    Logger::log('STEP', 'Atelier image candidate rejected', [
+                        'url' => $candidate_url,
+                        'reason' => $reason,
+                    ]);
+                }
+                $rejected_count++;
+                continue;
+            }
+            $ranked[] = ['url' => $candidate_url, 'score' => $score, 'reason' => $reason];
+        }
+        usort($ranked, static fn(array $left, array $right): int => $right['score'] <=> $left['score']);
+        return $ranked[0] ?? ['url' => '', 'score' => 0, 'reason' => 'no-title-match'];
     }
 
-    private static function validate_image_url(string $url, string $title): string {
+    /**
+     * @param array<int,array{url:string,source:string,context:string}> $candidates
+     */
+    private static function add_image_candidate(array &$candidates, string $url, string $source, string $context): void {
+        $url = trim($url);
+        if ($url === '') {
+            return;
+        }
+        $candidates[] = [
+            'url' => $url,
+            'source' => $source,
+            'context' => trim($context),
+        ];
+    }
+
+    /**
+     * @param array<mixed> $node
+     * @param array<int,array{url:string,source:string,context:string}> $candidates
+     */
+    private static function collect_json_ld_images(array $node, array &$candidates): void {
+        $context_parts = [];
+        foreach (['name', 'headline', 'alternateName'] as $context_key) {
+            if (isset($node[$context_key]) && is_string($node[$context_key])) {
+                $context_parts[] = $node[$context_key];
+            }
+        }
+        $context = implode(' ', $context_parts);
+
+        foreach ($node as $key => $value) {
+            if (in_array(strtolower((string) $key), ['image', 'thumbnailurl'], true)) {
+                self::collect_json_ld_image_value($value, $context, $candidates);
+            }
+            if (is_array($value)) {
+                self::collect_json_ld_images($value, $candidates);
+            }
+        }
+    }
+
+    /**
+     * @param mixed $value
+     * @param array<int,array{url:string,source:string,context:string}> $candidates
+     */
+    private static function collect_json_ld_image_value($value, string $context, array &$candidates): void {
+        if (is_string($value)) {
+            self::add_image_candidate($candidates, $value, 'json-ld', $context);
+            return;
+        }
+        if (!is_array($value)) {
+            return;
+        }
+        foreach ($value as $key => $item) {
+            if (is_string($item) && in_array(strtolower((string) $key), ['url', 'contenturl'], true)) {
+                self::add_image_candidate($candidates, $item, 'json-ld', $context);
+            } else {
+                self::collect_json_ld_image_value($item, $context, $candidates);
+            }
+        }
+    }
+
+    /**
+     * @param array<int,string> $excluded_image_urls
+     * @return array{0:int,1:string}
+     */
+    private static function score_artist_image(
+        string $url,
+        string $title,
+        string $source,
+        string $context,
+        array $excluded_image_urls
+    ): array {
+        if (self::image_is_excluded($url, $excluded_image_urls)) {
+            return [0, 'already-used-by-another-concert'];
+        }
+        if (!self::is_likely_artist_image($url, $title, $context)) {
+            return [0, 'generic-or-non-artist-image'];
+        }
+
+        $tokens = self::artist_title_tokens($title);
+        $normalized_url = self::normalize_image_text(rawurldecode($url));
+        $normalized_context = self::normalize_image_text($context);
+        $url_matches = 0;
+        $context_matches = 0;
+        foreach ($tokens as $token) {
+            $url_matches += str_contains($normalized_url, $token) ? 1 : 0;
+            $context_matches += str_contains($normalized_context, $token) ? 1 : 0;
+        }
+        if ($url_matches + $context_matches === 0) {
+            return [0, 'no-artist-title-match'];
+        }
+
+        $source_score = [
+            'json-ld' => 35,
+            'social-meta' => 25,
+            'content-image' => 15,
+        ][$source] ?? 0;
+        $score = $source_score + ($url_matches * 25) + ($context_matches * 15);
+        return [
+            $score,
+            sprintf('%s; %d URL and %d context title-token matches', $source, $url_matches, $context_matches),
+        ];
+    }
+
+    /**
+     * @param array<int,string> $excluded_image_urls
+     */
+    private static function validate_image_url(string $url, string $title, array $excluded_image_urls = []): string {
         $url = esc_url_raw($url);
-        if (!$url || !self::is_likely_artist_image($url, $title)) {
+        if (!$url || !self::is_likely_artist_image($url, $title) || self::image_is_excluded($url, $excluded_image_urls)) {
             return '';
         }
         $response = wp_remote_head($url, [
@@ -244,19 +404,60 @@ final class AI {
         return esc_url_raw($origin . '/' . ltrim($path . '/' . $url, '/'));
     }
 
-    private static function is_likely_artist_image(string $url, string $title): bool {
-        $lower = strtolower($url);
-        foreach (['logo', 'sponsor', 'footer', 'cookie', 'icon', 'avatar'] as $bad) {
-            if (str_contains($lower, $bad)) {
-                return false;
+    public static function image_key(string $url): string {
+        $parts = wp_parse_url(html_entity_decode($url));
+        if (!is_array($parts) || empty($parts['host']) || empty($parts['path'])) {
+            return strtolower(trim($url));
+        }
+        return strtolower((string) $parts['host'] . rawurldecode((string) $parts['path']));
+    }
+
+    /**
+     * @param array<int,string> $excluded_image_urls
+     */
+    private static function image_is_excluded(string $url, array $excluded_image_urls): bool {
+        $key = self::image_key($url);
+        foreach ($excluded_image_urls as $excluded_url) {
+            if ($key === self::image_key((string) $excluded_url)) {
+                return true;
             }
         }
-        foreach (['ticket', 'qr', 'barcode', 'map'] as $bad) {
+        return false;
+    }
+
+    private static function is_likely_artist_image(string $url, string $title, string $context = ''): bool {
+        unset($title);
+        $lower = strtolower(rawurldecode($url . ' ' . $context));
+        foreach ([
+            'logo', 'sponsor', 'footer', 'cookie', 'icon', 'avatar',
+            'ticket', 'qr', 'barcode', 'map', 'header', 'hero', 'banner',
+            'placeholder', 'default-image', 'default_image',
+        ] as $bad) {
             if (str_contains($lower, $bad)) {
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * @return array<int,string>
+     */
+    private static function artist_title_tokens(string $title): array {
+        $normalized = self::normalize_image_text($title);
+        $stop_words = [
+            'and', 'at', 'avec', 'concert', 'den', 'feat', 'featuring', 'live',
+            'luxembourg', 'presents', 'the', 'tour', 'with',
+        ];
+        $tokens = preg_split('/[^a-z0-9]+/', $normalized) ?: [];
+        return array_values(array_unique(array_filter(
+            $tokens,
+            static fn(string $token): bool => strlen($token) >= 3 && !in_array($token, $stop_words, true)
+        )));
+    }
+
+    private static function normalize_image_text(string $value): string {
+        return strtolower(remove_accents($value));
     }
 
     private static function prompt(array $pdf_analysis = []): string {
