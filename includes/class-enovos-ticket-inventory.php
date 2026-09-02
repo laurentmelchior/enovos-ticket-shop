@@ -72,6 +72,20 @@ final class TicketInventory {
         return is_array($row) ? $row : null;
     }
 
+    public static function packages_for_order(int $order_id): array {
+        global $wpdb;
+        if ($order_id <= 0) {
+            return [];
+        }
+        return $wpdb->get_results($wpdb->prepare(
+            "SELECT id,concert_title,package_no,ticket_pages,status,pdf_path
+             FROM " . self::table() . "
+             WHERE order_id=%d
+             ORDER BY id ASC",
+            $order_id
+        ), ARRAY_A) ?: [];
+    }
+
     public static function create_packages(int $product_id, array $event, string $source_pdf, string $import_id) {
         global $wpdb;
         $event_key = sanitize_text_field((string)($event['_import_key'] ?? ''));
@@ -164,11 +178,11 @@ final class TicketInventory {
             for ($n = 0; $n < $qty; $n++) {
                 $package_id = self::claim_available_package($product_id, $order->get_id(), (int)$item_id);
                 if (!$package_id) {
-                    $order->add_order_note(sprintf('Enovos Ticket Shop: no AVAILABLE ticket package could be reserved for product #%d.', $product_id));
+                    $order->add_order_note(sprintf('Enovos WooCommerce Addons: no AVAILABLE ticket package could be reserved for product #%d.', $product_id));
                     Logger::log('FAIL', 'No available ticket package for order', ['order_id' => $order->get_id(), 'product_id' => $product_id]);
                     continue;
                 }
-                $order->add_order_note(sprintf('Enovos Ticket Shop: ticket package #%d reserved.', $package_id));
+                $order->add_order_note(sprintf('Enovos WooCommerce Addons: ticket package #%d reserved.', $package_id));
                 Logger::log('OK', 'Ticket package reserved for order', ['package_id' => $package_id, 'order_id' => $order->get_id(), 'product_id' => $product_id]);
             }
             // Do not sync WooCommerce stock here – WC already decrements on order.

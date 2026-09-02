@@ -1,4 +1,4 @@
-# Enovos Concert Ticket Shop Importer
+# Enovos WooCommerce Addons
 
 WordPress / WooCommerce plugin for importing concert ticket PDFs into products and securely allocating two-ticket PDF packages to customer orders.
 
@@ -24,7 +24,7 @@ WordPress / WooCommerce plugin for importing concert ticket PDFs into products a
 
 ## AI provider
 
-Choose exactly one provider in **Enovos Tickets > Settings > Ticket Shop**:
+Choose exactly one provider in **Enovos WooCommerce Addons > Settings > Ticket Shop**:
 
 - OpenAI
 - Gemini
@@ -44,7 +44,7 @@ An administrator can enter or replace the price manually. A positive reviewed pr
 
 ## Settings toggles
 
-Under **Enovos Tickets > Settings > Ticket Shop** you can also enable/disable:
+Under **Enovos WooCommerce Addons > Settings > Ticket Shop** you can also enable/disable:
 
 - Publish products immediately (otherwise drafts)
 - Attach Me! sync when the plugin is available
@@ -56,6 +56,40 @@ Under **Enovos Tickets > Settings > Ticket Shop** you can also enable/disable:
 - Auto-selecting ready concerts in the import check
 - Ticket delivery on Completed or Processing customer email
 - Admin list size (inventory rows + log lines)
+- Enovos ticket status box on WooCommerce orders
+- Ticket email resend through existing Attach Me! attachments
+- System preflight checks
+- Successful ticket-delivery order notes
+
+## Order support and delivery
+
+The WooCommerce order screen can show a compact **Enovos tickets** box beside Attach Me!. It lists the assigned concert, package number, ticket pages and Enovos inventory status. Attach Me! remains responsible for the attachment list, secure customer downloads and embedding the PDF in the configured customer email.
+
+For delivered packages, administrators can resend the configured Completed or Processing customer email. The same Attach Me! files are used again: no new package is reserved and stock does not change. Successful original and repeated deliveries can be recorded in the order notes.
+
+The plugin explicitly supports WooCommerce HPOS and also reserves ticket packages when an order is created through the Store API / Block Checkout.
+
+## System check
+
+When enabled, **Settings > Ticket Shop** shows read-only preflight checks for:
+
+- a supported PDF engine
+- the exact `VAT 3%` WooCommerce tax class
+- the `den-atelier` product category
+- credentials for the selected AI provider
+- writable protected uploads
+- an active and enabled Attach Me! installation
+
+## Feature switches and rollback
+
+The order box, resend action, system check and delivery notes have independent settings and do not create new database tables. Disabling a switch stops its hooks on the next request without deleting existing order or ticket data.
+
+For complete code removal in a future release:
+
+- Order box + resend: remove `includes/class-enovos-order-tickets.php`, its bootstrap `require_once`, initialization and the two matching settings.
+- Delivery notes: remove `includes/class-enovos-delivery-tracking.php`, its bootstrap `require_once`, initialization and setting.
+- System check: remove `includes/class-enovos-system-check.php`, its bootstrap `require_once`, render call and setting.
+- HPOS + Store API safety: `includes/class-enovos-woocommerce-compatibility.php` is intentionally not switchable because removing Store API reservation can produce orders without assigned ticket packages.
 
 ## Ticket inventory
 
@@ -79,7 +113,7 @@ Dependencies are shipped under `vendor/` (`setasign/fpdf`, `setasign/fpdi`). Aft
 New WooCommerce customer accounts use a two-step approval flow:
 
 1. Every new customer receives an email verification link that is valid for 48 hours.
-2. After verification, exact email domains listed under **Enovos Tickets > Settings > Customer Approval** are approved automatically.
+2. After verification, exact email domains listed under **Enovos WooCommerce Addons > Settings > Customer Approval** are approved automatically.
 3. Verified customers from all other domains remain blocked until a user with the `manage_woocommerce` capability approves them.
 
 Pending and rejected accounts cannot sign in or check out. Rejected accounts remain in WordPress and receive a rejection notification. Existing users without an Enovos approval status are unaffected.
@@ -99,7 +133,7 @@ The login page shows **Did not receive the verification email?** as a simple lin
 
 ## Beefree email templates
 
-Open **Enovos Tickets > Settings > Email Templates** to optionally replace any registered WooCommerce email with a complete Beefree HTML export. Enable **Use custom HTML templates**, select an email, paste its HTML and save. The setting is off by default, and an empty field always falls back to the original WooCommerce or plugin template.
+Open **Enovos WooCommerce Addons > Settings > Email Templates** to optionally replace any registered WooCommerce email with a complete Beefree HTML export. Enable **Use custom HTML templates**, select an email, paste its HTML and save. The setting is off by default, and an empty field always falls back to the original WooCommerce or plugin template.
 
 Custom templates apply to emails configured as HTML. They are sent as the complete document without an additional WooCommerce header or footer. Existing email recipients, subjects and attachments are unchanged, including Enovos ticket PDF attachments.
 

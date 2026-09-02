@@ -36,7 +36,7 @@ final class Logger {
 
         $dir = self::log_dir();
         if ($dir === '') {
-            error_log('[Enovos Ticket Shop] ' . $line);
+            error_log('[Enovos WooCommerce Addons] ' . $line);
             return;
         }
         $file = trailingslashit($dir) . 'import.log';
