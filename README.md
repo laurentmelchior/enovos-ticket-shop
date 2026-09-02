@@ -22,7 +22,7 @@ WordPress / WooCommerce plugin for importing concert ticket PDFs into products a
 - Products are Simple Products, stock managed, Sold individually, and assigned to product category `den-atelier`.
 - Products use the `VAT 3%` tax class.
 - An Atelier concert URL is accepted only when its page date exactly matches the date extracted from the PDF.
-- Featured images are taken from the header metadata or hero area of that date-matched Atelier page. Generic assets are rejected, every image is verified as downloadable, and the same image is not reused for different concerts in one import.
+- Featured images are taken from the header metadata or hero area of that date-matched Atelier page. Official `apps.ticketmatic.com` images embedded there are accepted; arbitrary AI-supplied Ticketmatic URLs are not. Generic assets are rejected, every image is verified as downloadable, and the same image is not reused for different concerts in one import.
 
 ## AI provider
 
@@ -36,9 +36,11 @@ Only the selected provider is called. Custom AI supports Bearer authentication, 
 
 If the official Atelier price cannot be verified, the selected AI provider performs a broader exact-event web search across credible organizers, primary ticket sellers, venues, and event listings. A result is displayed as **Suggested – review**, never as verified.
 
-During enrichment, the candidate Atelier page is checked against the authoritative PDF date, because Atelier keeps past concerts on the same `/shows/<slug>/` path. The importer reads structured event data, HTML time metadata and the visible English date from the page. If no exact match is found, the Atelier URL remains empty and the import check displays a review warning instead of retaining an old concert link.
+During enrichment, the dedicated `https://www.atelier.lu/ate_show-sitemap.xml` is searched first, with Atelier's generic sitemaps retained as fallbacks. Candidate pages are checked against the authoritative PDF date because Atelier keeps past concerts on the same `/shows/<slug>/` path. The importer reads the scoped hero `<p class="date">` first, then structured event data and HTML time metadata. This prevents dates from recommendation sections from being mistaken for the concert date.
 
-With Gemini selected, a missing artist image triggers a separate grounded web search even when no date-matched Atelier page was found. The plugin uses the returned official artist, label, management or dedicated reputable press page as evidence, extracts its social/structured image, and verifies that the image can be downloaded before import. Venue and event-listing pages are excluded. The import check shows the selected image source or the reason no verified image was accepted.
+The import check always provides an editable Atelier URL field, prefilled when automatic matching succeeds. Administrators can add or replace the link before import. Only HTTPS links on `atelier.lu` are accepted. A reachable page with a proven date mismatch is rejected; an explicitly entered link is retained when Cloudflare or a network error prevents server-side verification. A date-matched manual page can also replace the product image with its verified header image.
+
+With Gemini selected, a missing artist image triggers a separate grounded web search even when no date-matched Atelier page was found. Gemini 3.6 Flash returns up to three ordered source pages: official artist, label or management, then dedicated reputable press. The plugin tries each page until its social/structured image passes artist matching, download and uniqueness checks. Venue and event-listing pages are excluded. The import check shows the selected image source or the reason no verified image was accepted.
 
 Every structurally valid concert remains available in the import check. Its ticket price is editable, accepts a decimal point or comma, and must be reviewed before import:
 

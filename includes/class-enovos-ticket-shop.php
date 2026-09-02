@@ -347,7 +347,15 @@ final class Plugin {
                 echo '<br><a target="_blank" rel="noopener" href="' . esc_url($event['price_source']) . '">Price source</a>';
             }
             echo '</td>';
-            echo '<td>' . (!empty($event['atelier_url']) ? '<a target="_blank" rel="noopener" href="' . esc_url($event['atelier_url']) . '">Open</a>' : 'Missing') . '</td>';
+            echo '<td><input type="url" name="atelier_url[' . esc_attr($key) . ']" value="'
+                . esc_attr((string) ($event['atelier_url'] ?? ''))
+                . '" placeholder="https://www.atelier.lu/shows/..." aria-label="'
+                . esc_attr('Atelier URL for ' . ($event['title'] ?? 'concert'))
+                . '" style="min-width:280px">';
+            if (!empty($event['atelier_url'])) {
+                echo '<br><a target="_blank" rel="noopener" href="' . esc_url($event['atelier_url']) . '">Open</a>';
+            }
+            echo '</td>';
             echo '<td>' . $image_status . '</td>';
             echo '<td><span style="font-weight:600">' . esc_html($status) . '</span></td>';
             echo '<td>' . esc_html(!$structurally_valid ? $blocked_reason : ($warnings ? implode(', ', $warnings) : '—')) . '</td>';
@@ -940,7 +948,10 @@ final class Plugin {
         $selected_keys = isset($_POST['selected_events']) && is_array($_POST['selected_events']) ? array_map('sanitize_text_field', wp_unslash($_POST['selected_events'])) : [];
         $posted_quantities = isset($_POST['product_quantity']) && is_array($_POST['product_quantity']) ? wp_unslash($_POST['product_quantity']) : [];
         $posted_prices = isset($_POST['event_price']) && is_array($_POST['event_price']) ? wp_unslash($_POST['event_price']) : [];
+        $posted_atelier_urls = isset($_POST['atelier_url']) && is_array($_POST['atelier_url']) ? wp_unslash($_POST['atelier_url']) : [];
+        $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), self::defaults());
         $selected_events = [];
+        $used_image_urls = [];
         foreach ($analysis['consensus'] as $event) {
             $key = $event['_import_key'] ?? $this->event_import_key($event);
             if (!in_array($key, $selected_keys, true)) continue;
@@ -960,12 +971,26 @@ final class Plugin {
                 wp_die(esc_html('Invalid ticket price for ' . ($event['title'] ?? 'concert') . ': ' . $reviewed_event->get_error_message()));
             }
             $event = $reviewed_event;
+            $reviewed_event = self::apply_reviewed_atelier_url(
+                $event,
+                $posted_atelier_urls[$key] ?? '',
+                array_keys($used_image_urls)
+            );
+            if (is_wp_error($reviewed_event)) {
+                wp_die(esc_html(
+                    'Invalid Atelier URL for ' . ($event['title'] ?? 'concert') . ': '
+                    . $reviewed_event->get_error_message()
+                ));
+            }
+            $event = $reviewed_event;
+            if (!empty($event['image_url'])) {
+                $used_image_urls[AI::image_key((string) $event['image_url'])] = true;
+            }
             $event['product_quantity'] = $qty;
             $selected_events[] = $event;
         }
         if (!$selected_events) wp_die('No valid concerts selected.');
 
-        $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), self::defaults());
         $settings['_source_filename'] = $analysis['source_filename'] ?? '';
         $settings['_import_id'] = $analysis['import_id'] ?? '';
         $result = Importer::build_products($selected_events, $settings);
@@ -1038,6 +1063,26 @@ final class Plugin {
         }
         unset($event['_price_warning']);
         return $event;
+    }
+
+    /**
+     * @param mixed $raw
+     * @param array<int,string> $excluded_image_urls
+     */
+    private static function apply_reviewed_atelier_url(
+        array $event,
+        $raw,
+        array $excluded_image_urls = []
+    ): array|\WP_Error {
+        if (!is_scalar($raw)) {
+            return new \WP_Error('invalid_manual_atelier_url', 'Enter a valid Atelier concert URL.');
+        }
+        $url = trim((string) $raw);
+        if ($url === '') {
+            $event['atelier_url'] = '';
+            return $event;
+        }
+        return AI::enrich_manual_atelier_url($event, $url, $excluded_image_urls);
     }
 
     private function event_import_key(array $event): string {

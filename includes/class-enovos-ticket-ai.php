@@ -121,7 +121,7 @@ final class AI {
             $page_image = self::atelier_header_image($resolved['html'], $url, $excluded_image_urls);
             $page_image_reason = $page_image !== '' ? 'atelier-page-header' : 'atelier-header-image-missing';
             if ($page_image !== '') {
-                $page_image = self::validate_image_url($page_image, $title, $excluded_image_urls);
+                $page_image = self::validate_atelier_image_url($page_image, $title, $excluded_image_urls);
                 if ($page_image === '') {
                     $page_image_reason = 'atelier-image-download-validation-failed';
                 }
@@ -184,36 +184,40 @@ final class AI {
             && !empty($settings['gemini_api_key'])
             && $title !== ''
         ) {
-            $source = self::gemini_artist_image_source($event, $settings);
-            if (!is_wp_error($source) && !empty($source['source_page_url'])) {
-                $source_url = self::safe_source_page_url((string) $source['source_page_url']);
-                $web_image = $source_url !== ''
-                    ? self::extract_official_artist_image($source_url, $title, $excluded_image_urls)
-                    : ['url' => '', 'score' => 0, 'reason' => 'unsafe-source-page'];
-                $validated_web_image = $web_image['url'] !== ''
-                    ? self::validate_image_url($web_image['url'], $title, $excluded_image_urls)
-                    : '';
-                if ($validated_web_image !== '') {
-                    $event['image_url'] = $validated_web_image;
-                    $event['image_source'] = 'gemini-web-page';
-                    $event['image_source_url'] = $source_url;
-                    unset($event['_image_warning']);
-                    Logger::log('OK', 'Gemini web artist image found and validated', [
-                        'title' => $title,
-                        'source_url' => $source_url,
-                        'image_url' => $validated_web_image,
-                    ]);
-                } else {
-                    $event['_image_warning'] = 'Gemini found a source page, but no matching downloadable artist image.';
+            $sources = self::gemini_artist_image_source($event, $settings);
+            if (!is_wp_error($sources) && !empty($sources['sources'])) {
+                foreach (array_slice($sources['sources'], 0, 3) as $source) {
+                    $source_url = self::safe_source_page_url((string) ($source['source_page_url'] ?? ''));
+                    $web_image = $source_url !== ''
+                        ? self::extract_official_artist_image($source_url, $title, $excluded_image_urls)
+                        : ['url' => '', 'score' => 0, 'reason' => 'unsafe-source-page'];
+                    $validated_web_image = $web_image['url'] !== ''
+                        ? self::validate_image_url($web_image['url'], $title, $excluded_image_urls)
+                        : '';
+                    if ($validated_web_image !== '') {
+                        $event['image_url'] = $validated_web_image;
+                        $event['image_source'] = 'gemini-web-page';
+                        $event['image_source_url'] = $source_url;
+                        unset($event['_image_warning']);
+                        Logger::log('OK', 'Gemini web artist image found and validated', [
+                            'title' => $title,
+                            'source_url' => $source_url,
+                            'image_url' => $validated_web_image,
+                        ]);
+                        break;
+                    }
                     Logger::log('FAIL', 'Gemini artist image source did not yield a valid image', [
                         'title' => $title,
                         'source_url' => $source_url,
                         'reason' => $web_image['reason'],
                     ]);
                 }
+                if (empty($event['image_url'])) {
+                    $event['_image_warning'] = 'Gemini found source pages, but none yielded a matching downloadable artist image.';
+                }
             } else {
-                $event['_image_warning'] = is_wp_error($source)
-                    ? $source->get_error_message()
+                $event['_image_warning'] = is_wp_error($sources)
+                    ? $sources->get_error_message()
                     : 'Gemini did not find a verifiable artist image source page.';
                 Logger::log('FAIL', 'Gemini artist image web fallback failed', [
                     'title' => $title,
@@ -226,6 +230,75 @@ final class AI {
             $event['_image_warning'] = 'No verified artist image found.';
         }
 
+        return $event;
+    }
+
+    /**
+     * Apply an administrator-entered Atelier URL without discarding it when
+     * Cloudflare or a network error prevents server-side verification.
+     *
+     * @param array<int,string> $excluded_image_urls
+     */
+    public static function enrich_manual_atelier_url(
+        array $event,
+        string $manual_url,
+        array $excluded_image_urls = []
+    ): array|\WP_Error {
+        $url = self::official_atelier_url($manual_url);
+        if ($url === '') {
+            return new \WP_Error(
+                'invalid_manual_atelier_url',
+                'Enter an HTTPS URL hosted on atelier.lu.'
+            );
+        }
+        $pdf_date = (string) ($event['date'] ?? '');
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $pdf_date)) {
+            return new \WP_Error('invalid_manual_atelier_date', 'The concert date is missing or invalid.');
+        }
+
+        $event['atelier_url'] = $url;
+        $page = self::fetch_atelier_page($url);
+        if (!$page['ok']) {
+            if ($page['blocked'] || $page['status'] === 0) {
+                $event['_analysis_warning'] = $page['blocked']
+                    ? 'The manual Atelier URL was kept, but Cloudflare blocked date verification.'
+                    : 'The manual Atelier URL was kept, but the page could not be reached for date verification.';
+                return $event;
+            }
+            return new \WP_Error(
+                'manual_atelier_page_unavailable',
+                sprintf('The Atelier page returned HTTP %d and could not be verified.', $page['status'])
+            );
+        }
+
+        $page_date = self::atelier_page_date($page['html']);
+        if ($page_date !== '' && !hash_equals($pdf_date, $page_date)) {
+            return new \WP_Error(
+                'manual_atelier_date_mismatch',
+                sprintf('The Atelier page date %s does not match the ticket date %s.', $page_date, $pdf_date)
+            );
+        }
+        if ($page_date === '') {
+            $event['_analysis_warning'] = 'The manual Atelier URL was kept, but its concert date could not be read.';
+            return $event;
+        }
+
+        $image = self::atelier_header_image($page['html'], $url, $excluded_image_urls);
+        $image = $image !== ''
+            ? self::validate_atelier_image_url(
+                $image,
+                (string) ($event['title'] ?? ''),
+                $excluded_image_urls
+            )
+            : '';
+        if ($image !== '') {
+            $event['image_url'] = $image;
+            $event['image_source'] = 'atelier-page';
+            unset($event['_image_warning']);
+        } else {
+            $event['_image_warning'] = 'The date-matched manual Atelier page has no downloadable header image.';
+        }
+        unset($event['_analysis_warning']);
         return $event;
     }
 
@@ -286,14 +359,18 @@ final class AI {
      * @return array<int,string>
      */
     private static function atelier_show_urls_from_sitemap(): array {
-        $cache_key = 'enovos_atelier_sitemap_show_urls';
+        $cache_key = 'enovos_atelier_sitemap_show_urls_v2';
         $cached = get_transient($cache_key);
         if (is_array($cached)) {
             return array_values(array_filter($cached, 'is_string'));
         }
 
         $show_urls = [];
-        foreach (['https://www.atelier.lu/sitemap.xml', 'https://www.atelier.lu/wp-sitemap.xml'] as $root_url) {
+        foreach ([
+            'https://www.atelier.lu/ate_show-sitemap.xml',
+            'https://www.atelier.lu/sitemap.xml',
+            'https://www.atelier.lu/wp-sitemap.xml',
+        ] as $root_url) {
             $root = self::fetch_atelier_page($root_url);
             if (!$root['ok']) {
                 continue;
@@ -480,6 +557,20 @@ final class AI {
     private static function atelier_page_date(string $html): string {
         $dom = new \DOMDocument();
         @$dom->loadHTML($html);
+        $xpath = new \DOMXPath($dom);
+        $hero_dates = $xpath->query(
+            '//*[contains(concat(" ",normalize-space(translate(@class,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"))," ")," hero-wrapper ")'
+            . ' or contains(concat(" ",normalize-space(translate(@class,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"))," ")," hero-slide-content ")]'
+            . '//*[self::p and contains(concat(" ",normalize-space(translate(@class,"ABCDEFGHIJKLMNOPQRSTUVWXYZ","abcdefghijklmnopqrstuvwxyz"))," ")," date ")]'
+        );
+        if ($hero_dates !== false) {
+            foreach ($hero_dates as $hero_date) {
+                $date = self::normalize_english_page_date((string) $hero_date->textContent);
+                if ($date !== '') {
+                    return $date;
+                }
+            }
+        }
         foreach ($dom->getElementsByTagName('script') as $script) {
             if (strtolower(trim((string) $script->getAttribute('type'))) !== 'application/ld+json') {
                 continue;
@@ -509,9 +600,9 @@ final class AI {
         }
 
         $text = html_entity_decode(wp_strip_all_tags($html), ENT_QUOTES | ENT_HTML5, 'UTF-8');
-        if (preg_match('/(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s*)?(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s*(\d{4})/i', $text, $match)) {
-            $timestamp = strtotime($match[1] . ' ' . $match[2] . ' ' . $match[3] . ' UTC');
-            return $timestamp !== false ? gmdate('Y-m-d', $timestamp) : '';
+        $date = self::normalize_english_page_date($text);
+        if ($date !== '') {
+            return $date;
         }
         if (preg_match('/\b(\d{1,2})[\/.](\d{1,2})[\/.](\d{4})\b/', $text, $match)) {
             return checkdate((int) $match[2], (int) $match[1], (int) $match[3])
@@ -519,6 +610,20 @@ final class AI {
                 : '';
         }
         return '';
+    }
+
+    private static function normalize_english_page_date(string $value): string {
+        if (!preg_match(
+            '/(?:(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday),\s*)?'
+            . '(January|February|March|April|May|June|July|August|September|October|November|December)'
+            . '\s+(\d{1,2}),\s*(\d{4})/i',
+            html_entity_decode($value, ENT_QUOTES | ENT_HTML5, 'UTF-8'),
+            $match
+        )) {
+            return '';
+        }
+        $timestamp = strtotime($match[1] . ' ' . $match[2] . ' ' . $match[3] . ' UTC');
+        return $timestamp !== false ? gmdate('Y-m-d', $timestamp) : '';
     }
 
     /**
@@ -614,7 +719,7 @@ final class AI {
             $url = self::absolute_url($base_url, html_entity_decode($candidate['url']));
             if (
                 $url !== ''
-                && self::is_likely_artist_image($url, '', $candidate['context'])
+                && self::is_allowed_atelier_image_candidate($url, $candidate['context'])
                 && !self::image_is_excluded($url, $excluded_image_urls)
             ) {
                 return $url;
@@ -901,6 +1006,33 @@ final class AI {
         if (!$url || !self::is_likely_artist_image($url, $title) || self::image_is_excluded($url, $excluded_image_urls)) {
             return '';
         }
+        return self::validate_downloadable_image($url);
+    }
+
+    /**
+     * Ticketmatic is trusted only for image URLs extracted from date-matched
+     * Atelier HTML. General AI image URLs still use validate_image_url().
+     *
+     * @param array<int,string> $excluded_image_urls
+     */
+    private static function validate_atelier_image_url(
+        string $url,
+        string $title,
+        array $excluded_image_urls = []
+    ): string {
+        $url = self::safe_source_page_url($url);
+        if (
+            !$url
+            || !self::is_allowed_atelier_image_candidate($url)
+            || self::image_is_excluded($url, $excluded_image_urls)
+        ) {
+            return '';
+        }
+        unset($title);
+        return self::validate_downloadable_image($url);
+    }
+
+    private static function validate_downloadable_image(string $url): string {
         $response = wp_safe_remote_head($url, [
             'timeout' => 20,
             'redirection' => 5,
@@ -915,6 +1047,14 @@ final class AI {
             ]);
         }
         return self::remote_response_is_image($response) ? $url : '';
+    }
+
+    private static function is_allowed_atelier_image_candidate(string $url, string $context = ''): bool {
+        $host = strtolower((string) wp_parse_url($url, PHP_URL_HOST));
+        if ($host === 'apps.ticketmatic.com') {
+            return strtolower((string) wp_parse_url($url, PHP_URL_SCHEME)) === 'https';
+        }
+        return self::is_likely_artist_image($url, '', $context);
     }
 
     /**
@@ -1363,11 +1503,11 @@ TXT;
         $title = trim((string) ($event['title'] ?? ''));
         $date = trim((string) ($event['date'] ?? ''));
         $prompt = sprintf(
-            'Find a public HTTPS page with an official artist or group press photo for "%s"%s. '
+            'Find up to three public HTTPS pages with an official artist or group press photo for "%s"%s. '
             . 'Use the official artist website, record label, management, or a dedicated artist profile or interview from a reputable press publication. '
             . 'The page title or metadata must clearly identify the exact artist or group. '
             . 'Do not return an event organizer, venue, event listing, image-search result, social network, ticket graphic, logo, poster, or generic event image. '
-            . 'Return the source web page URL, not a guessed direct image URL.',
+            . 'Return source web page URLs, not guessed direct image URLs. Order them: official artist first, then label or management, then reputable press.',
             $title,
             $date !== '' ? ' (concert date ' . $date . ')' : ''
         );
@@ -1379,14 +1519,24 @@ TXT;
                 'responseSchema' => [
                     'type' => 'object',
                     'properties' => [
-                        'source_page_url' => ['type' => 'string'],
-                        'source_type' => [
-                            'type' => 'string',
-                            'enum' => ['artist', 'label', 'management', 'press'],
+                        'sources' => [
+                            'type' => 'array',
+                            'maxItems' => 3,
+                            'items' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'source_page_url' => ['type' => 'string'],
+                                    'source_type' => [
+                                        'type' => 'string',
+                                        'enum' => ['artist', 'label', 'management', 'press'],
+                                    ],
+                                    'evidence' => ['type' => 'string'],
+                                ],
+                                'required' => ['source_page_url', 'source_type', 'evidence'],
+                            ],
                         ],
-                        'evidence' => ['type' => 'string'],
                     ],
-                    'required' => ['source_page_url', 'source_type', 'evidence'],
+                    'required' => ['sources'],
                 ],
             ],
         ];
@@ -1423,17 +1573,28 @@ TXT;
             ]);
         }
         $result = json_decode(trim($text), true);
-        if (
-            !is_array($result)
-            || empty($result['source_page_url'])
-            || !in_array((string) ($result['source_type'] ?? ''), ['artist', 'label', 'management', 'press'], true)
-        ) {
-            return new \WP_Error('gemini_artist_image_json', 'Gemini did not return an artist image source page.');
+        if (!is_array($result) || !is_array($result['sources'] ?? null)) {
+            return new \WP_Error('gemini_artist_image_json', 'Gemini did not return artist image source pages.');
         }
-        if (self::safe_source_page_url((string) $result['source_page_url']) === '') {
-            return new \WP_Error('gemini_artist_image_unsafe_url', 'Gemini returned an unsafe artist image source page.');
+        $sources = [];
+        foreach (array_slice($result['sources'], 0, 3) as $source) {
+            if (
+                !is_array($source)
+                || !in_array((string) ($source['source_type'] ?? ''), ['artist', 'label', 'management', 'press'], true)
+            ) {
+                continue;
+            }
+            $safe_url = self::safe_source_page_url((string) ($source['source_page_url'] ?? ''));
+            if ($safe_url === '') {
+                continue;
+            }
+            $source['source_page_url'] = $safe_url;
+            $sources[] = $source;
         }
-        return $result;
+        if (!$sources) {
+            return new \WP_Error('gemini_artist_image_unsafe_url', 'Gemini returned no safe artist image source page.');
+        }
+        return ['sources' => $sources];
     }
 
     private static function atelier_prompt(string $url, array $event): string {
