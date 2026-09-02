@@ -21,7 +21,8 @@ WordPress / WooCommerce plugin for importing concert ticket PDFs into products a
 - The ticket PDF price is never used.
 - Products are Simple Products, stock managed, Sold individually, and assigned to product category `den-atelier`.
 - Products use the `VAT 3%` tax class.
-- Featured images must match the artist or group named by the concert. Generic venue, header and Atelier placeholder images are rejected, and the same image is not reused for different concerts in one import.
+- An Atelier concert URL is accepted only when its page date exactly matches the date extracted from the PDF.
+- Featured images come only from the header metadata or hero area of that date-matched Atelier page. Generic assets are rejected, and the same image is not reused for different concerts in one import.
 
 ## AI provider
 
@@ -34,6 +35,8 @@ Choose exactly one provider in **Enovos WooCommerce Addons > Settings > Ticket S
 Only the selected provider is called. Custom AI supports Bearer authentication, a configurable API-key header, or no authentication.
 
 If the official Atelier price cannot be verified, the selected AI provider performs a broader exact-event web search across credible organizers, primary ticket sellers, venues, and event listings. A result is displayed as **Suggested – review**, never as verified.
+
+During enrichment, the candidate Atelier page is checked against the authoritative PDF date. The importer reads structured event data, HTML time metadata and the visible English date from the page. If no exact match is found, the Atelier URL and image remain empty and the import check displays a review warning instead of retaining an old concert link. Product images are never supplied by AI.
 
 Every structurally valid concert remains available in the import check. Its ticket price is editable, accepts a decimal point or comma, and must be reviewed before import:
 
@@ -81,6 +84,7 @@ When enabled, **Settings > Ticket Shop** shows read-only preflight checks for:
 - the exact `VAT 3%` WooCommerce tax class
 - the `den-atelier` product category
 - credentials for the selected AI provider
+- Atelier page access, including Cloudflare blocking, event-date parsing and header-image availability
 - writable protected uploads
 - an active and enabled Attach Me! installation
 
@@ -128,6 +132,16 @@ Pending and rejected accounts cannot sign in or check out. Rejected accounts rem
 Manage waiting accounts under **WooCommerce > Pending Customers**. Administrators can directly approve or reject verified customers, or resend a verification message to customers who have not confirmed their email. Administrator emails contain separate Approve and Reject links. Each link requires a WordPress login and a POST confirmation, so email security scanners cannot change an account status.
 
 After registration, the My Account page displays a confirmation banner asking the customer to check their email. **WordPress > Users** shows a Customer status column with **Email not confirmed**, **Pending**, **Approved** or **Rejected**. Users created before this workflow and users outside it show no Enovos status.
+
+### Registration notice shortcode
+
+For Impreza/WPBakery layouts, edit the WooCommerce My Account page and add the **Enovos Registration Notice** element directly above the element or text block containing `[woocommerce_my_account]`. Alternatively, add this shortcode in a WPBakery text block:
+
+```
+[enovos_registration_notice]
+```
+
+The default `type="auto"` displays the post-registration confirmation or the current Enovos account status when applicable. `type="registration"` and `type="status"` restrict the output. Administrators can temporarily use `debug="1"` to display the notice inputs without exposing them to customers. Exclude the My Account page from full-page caching so its query string and customer-specific state are preserved.
 
 Enter one exact domain per line in the whitelist without `@`. A domain does not include its subdomains: for example, `company.com` does not match `shop.company.com`. Approval notification recipients are configurable; when left empty, the WordPress administration email is used.
 

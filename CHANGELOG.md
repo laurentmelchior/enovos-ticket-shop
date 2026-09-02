@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 0.7.2 – 2026-09-02
+- Added an Impreza/WPBakery-compatible registration notice shortcode and page-builder element for the WooCommerce My Account page.
+- Preserved the post-registration notice through a short-lived secure cookie when redirects or caching remove its query parameter.
+- Required Atelier concert pages to match the authoritative PDF date before their URL, description, price context or image can be used.
+- Restricted product images to header metadata or hero images from the date-matched Atelier page; AI-provided images are no longer accepted.
+- Added Cloudflare, event-date and header-image diagnostics for Atelier page access to the system check.
+
 ## Version 0.7.1 – 2026-09-02
 - Added a reliable post-registration confirmation banner on the WooCommerce My Account page.
 - Added Customer status to WordPress Users with Email not confirmed, Pending, Approved and Rejected states.
