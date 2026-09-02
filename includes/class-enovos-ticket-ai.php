@@ -248,21 +248,12 @@ final class AI {
         }
 
         $slug = sanitize_title($title);
+        foreach (self::rank_atelier_show_urls(self::atelier_show_urls_from_sitemap(), $title) as $url) {
+            $candidates[] = $url;
+        }
         if ($slug !== '') {
             $candidates[] = 'https://www.atelier.lu/shows/' . $slug . '-' . substr($pdf_date, 0, 4) . '/';
             $candidates[] = 'https://www.atelier.lu/shows/' . $slug . '-2/';
-        }
-
-        $search = self::fetch_atelier_page('https://www.atelier.lu/?s=' . rawurlencode($title));
-        if ($search['ok'] && preg_match_all('~href=["\']([^"\']*/shows/[^"\']+/?)["\']~i', $search['html'], $matches)) {
-            foreach ($matches[1] as $match) {
-                $url = self::official_atelier_url(
-                    self::absolute_url('https://www.atelier.lu/', html_entity_decode((string) $match))
-                );
-                if ($url !== '') {
-                    $candidates[] = $url;
-                }
-            }
         }
 
         $blocked = false;
@@ -289,6 +280,131 @@ final class AI {
             'date' => '',
             'reason' => $blocked ? 'Atelier blocked the page request with Cloudflare' : 'no exact date match',
         ];
+    }
+
+    /**
+     * @return array<int,string>
+     */
+    private static function atelier_show_urls_from_sitemap(): array {
+        $cache_key = 'enovos_atelier_sitemap_show_urls';
+        $cached = get_transient($cache_key);
+        if (is_array($cached)) {
+            return array_values(array_filter($cached, 'is_string'));
+        }
+
+        $show_urls = [];
+        foreach (['https://www.atelier.lu/sitemap.xml', 'https://www.atelier.lu/wp-sitemap.xml'] as $root_url) {
+            $root = self::fetch_atelier_page($root_url);
+            if (!$root['ok']) {
+                continue;
+            }
+            $parsed = self::parse_atelier_sitemap_xml($root['html']);
+            $show_urls = array_merge($show_urls, $parsed['show_urls']);
+            foreach (array_slice($parsed['child_urls'], 0, 5) as $child_url) {
+                $child = self::fetch_atelier_page($child_url);
+                if (!$child['ok']) {
+                    continue;
+                }
+                $child_parsed = self::parse_atelier_sitemap_xml($child['html']);
+                $show_urls = array_merge($show_urls, $child_parsed['show_urls']);
+            }
+            if ($show_urls) {
+                break;
+            }
+        }
+
+        $show_urls = array_values(array_unique($show_urls));
+        set_transient($cache_key, $show_urls, 6 * HOUR_IN_SECONDS);
+        Logger::log($show_urls ? 'OK' : 'FAIL', 'Atelier sitemap show URLs loaded', [
+            'count' => count($show_urls),
+        ]);
+        return $show_urls;
+    }
+
+    /**
+     * @return array{show_urls:array<int,string>,child_urls:array<int,string>}
+     */
+    private static function parse_atelier_sitemap_xml(string $xml): array {
+        $result = ['show_urls' => [], 'child_urls' => []];
+        $xml = trim($xml);
+        if (
+            $xml === ''
+            || $xml[0] !== '<'
+            || stripos($xml, '<!DOCTYPE') !== false
+            || stripos($xml, '<html') !== false
+        ) {
+            return $result;
+        }
+
+        $previous_errors = libxml_use_internal_errors(true);
+        $dom = new \DOMDocument();
+        $loaded = $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous_errors);
+        if (!$loaded || !$dom->documentElement) {
+            return $result;
+        }
+
+        $is_index = strtolower($dom->documentElement->localName) === 'sitemapindex';
+        $xpath = new \DOMXPath($dom);
+        $locations = $xpath->query('//*[local-name()="loc"]');
+        if ($locations === false) {
+            return $result;
+        }
+        foreach ($locations as $location) {
+            $url = self::official_atelier_url(trim((string) $location->textContent));
+            if ($url === '') {
+                continue;
+            }
+            $path = strtolower((string) wp_parse_url($url, PHP_URL_PATH));
+            if ($is_index) {
+                if (
+                    str_contains($path, 'sitemap')
+                    && preg_match('/(?:post|show|page|wp-sitemap-posts)/', $path)
+                ) {
+                    $result['child_urls'][] = $url;
+                }
+            } elseif (preg_match('~^/shows/[^/]+/?$~', $path)) {
+                $result['show_urls'][] = $url;
+            }
+        }
+
+        $result['show_urls'] = array_values(array_unique($result['show_urls']));
+        $result['child_urls'] = array_slice(array_values(array_unique($result['child_urls'])), 0, 5);
+        return $result;
+    }
+
+    /**
+     * @param array<int,string> $urls
+     * @return array<int,string>
+     */
+    private static function rank_atelier_show_urls(array $urls, string $title): array {
+        $title_slug = sanitize_title($title);
+        $tokens = array_values(array_filter(
+            preg_split('/-+/', $title_slug) ?: [],
+            static fn(string $token): bool => strlen($token) >= 2
+        ));
+        $ranked = [];
+        foreach ($urls as $url) {
+            $path = (string) wp_parse_url($url, PHP_URL_PATH);
+            $url_slug = sanitize_title((string) basename(untrailingslashit($path)));
+            $score = $url_slug === $title_slug && $title_slug !== '' ? 1000 : 0;
+            if ($score === 0 && $title_slug !== '' && str_contains($url_slug, $title_slug)) {
+                $score = 500;
+            }
+            foreach ($tokens as $token) {
+                if (preg_match('/(?:^|-)' . preg_quote($token, '/') . '(?:-|$)/', $url_slug)) {
+                    $score += 10;
+                }
+            }
+            if ($score > 0) {
+                $ranked[] = ['url' => $url, 'score' => $score];
+            }
+        }
+        usort($ranked, static function (array $left, array $right): int {
+            return $right['score'] <=> $left['score'] ?: strcmp($left['url'], $right['url']);
+        });
+        return array_column($ranked, 'url');
     }
 
     /**
