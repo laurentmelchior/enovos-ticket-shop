@@ -1,5 +1,12 @@
 # Changelog
 
+## Version 0.7.2 – 2026-09-02
+- Expanded Ticket Inventory and the ticket PDF upload dashboard to the full WordPress admin content width.
+- Added `user_login` compatibility to all Enovos customer emails for the Email Templates plugin.
+- Added a Gemini web fallback that finds a verified artist source page when Atelier has no usable image or URL.
+- Accepted title-matched social images with neutral CDN filenames and retried blocked image HEAD checks with a bounded GET request.
+- Added the artist image source or missing-image reason to the import check.
+
 ## Version 0.7.1 – 2026-09-02
 - Added a reliable post-registration confirmation banner on the WooCommerce My Account page.
 - Added Customer status to WordPress Users with Email not confirmed, Pending, Approved and Rejected states.
