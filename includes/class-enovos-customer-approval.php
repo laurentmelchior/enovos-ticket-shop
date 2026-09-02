@@ -29,6 +29,7 @@ final class CustomerApproval {
         add_filter('woocommerce_registration_redirect', [self::class, 'registration_redirect']);
         add_filter('wp_authenticate_user', [self::class, 'check_login'], 10, 2);
         add_action('template_redirect', [self::class, 'handle_frontend_request']);
+        add_filter('the_content', [self::class, 'prepend_registration_confirmation'], 20);
         add_action('woocommerce_after_checkout_validation', [self::class, 'validate_checkout'], 10, 2);
         add_filter('rest_pre_dispatch', [self::class, 'validate_store_api_checkout'], 10, 3);
         add_action('woocommerce_login_form_end', [self::class, 'render_resend_form']);
@@ -114,12 +115,6 @@ final class CustomerApproval {
             self::handle_verification_link();
         }
         $is_get_request = strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) === 'GET';
-        if ($is_get_request && isset($_GET['enovos_registration']) && sanitize_key((string) $_GET['enovos_registration']) === 'pending') {
-            wc_add_notice(
-                __('Your account was created. Please check your inbox and confirm your email address before signing in.', 'enovos-ticket-shop'),
-                'success'
-            );
-        }
         if ($is_get_request && isset($_GET['enovos_resend']) && sanitize_key((string) $_GET['enovos_resend']) === 'submitted') {
             wc_add_notice(
                 __('If an account is waiting for email confirmation, a new verification link has been sent.', 'enovos-ticket-shop'),
@@ -152,6 +147,26 @@ final class CustomerApproval {
             wp_safe_redirect(self::my_account_url());
             exit;
         }
+    }
+
+    public static function prepend_registration_confirmation(string $content): string {
+        if (
+            !self::enabled()
+            || strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'GET'
+            || sanitize_key((string) ($_GET['enovos_registration'] ?? '')) !== 'pending'
+            || !function_exists('is_account_page')
+            || !is_account_page()
+            || !is_main_query()
+            || !in_the_loop()
+        ) {
+            return $content;
+        }
+
+        $message = esc_html__(
+            'Your account was created. Please check your inbox and confirm your email address before signing in.',
+            'enovos-ticket-shop'
+        );
+        return '<div class="woocommerce-message" role="alert">' . $message . '</div>' . $content;
     }
 
     /**
