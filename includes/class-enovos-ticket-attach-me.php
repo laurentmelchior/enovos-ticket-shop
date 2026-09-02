@@ -147,6 +147,31 @@ final class AttachMe {
         }
     }
 
+    /**
+     * Statuses in which Attach Me! must hide a customer ticket download.
+     * Unknown/custom statuses are denied by default.
+     *
+     * @return list<string>
+     */
+    public static function hidden_order_statuses(string $delivery_status): array {
+        $statuses = function_exists('wc_get_order_statuses')
+            ? array_keys(wc_get_order_statuses())
+            : [
+                'wc-pending',
+                'wc-processing',
+                'wc-on-hold',
+                'wc-completed',
+                'wc-cancelled',
+                'wc-refunded',
+                'wc-failed',
+                'wc-checkout-draft',
+            ];
+        $allowed = $delivery_status === 'processing'
+            ? ['wc-processing', 'wc-completed']
+            : ['wc-completed'];
+        return array_values(array_diff(array_unique($statuses), $allowed));
+    }
+
     private static function ensure_media_attachment(string $pdf_path, string $title, int $package_no) {
         require_once ABSPATH . 'wp-admin/includes/file.php';
         require_once ABSPATH . 'wp-admin/includes/media.php';
@@ -196,6 +221,9 @@ final class AttachMe {
      */
     private static function register_gallery_attachments(int $order_id, array $items): bool {
         $next = self::next_index($order_id);
+        $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), Plugin::defaults());
+        $delivery = $settings['delivery_order_status'] ?? 'completed';
+        $hidden_statuses = self::hidden_order_statuses($delivery);
 
         $backup_post = $_POST;
         $backup_files = $_FILES;
@@ -215,23 +243,13 @@ final class AttachMe {
             $_POST['wcam_attachment_gallery_media_id'][$index] = (string) $item['media_id'];
             $_POST['wcam_expiration_strategy'][$index] = 'never';
             $_POST['wcam-secure-download'][$index] = 'yes';
-            // Make tickets visible on paid/fulfil statuses.
-            $_POST['wcam-order-attachment-hide-by-status'][$index] = [
-                'wc-pending',
-                'wc-on-hold',
-                'wc-cancelled',
-                'wc-refunded',
-                'wc-failed',
-                'wc-checkout-draft',
-            ];
+            $_POST['wcam-order-attachment-hide-by-status'][$index] = $hidden_statuses;
             // Ask Attach Me! to embed the file only in the Completed customer email.
             // Unchecked WCAM checkboxes must be omitted (not sent as "no").
             $_POST['wcam-attach-file-to-complete-order-email'][$index] = 'yes';
         }
 
         // Honour plugin setting if an older install still uses Processing.
-        $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), Plugin::defaults());
-        $delivery = $settings['delivery_order_status'] ?? 'completed';
         if ($delivery === 'processing') {
             foreach ($items as $offset => $_item) {
                 $index = $next + $offset;
