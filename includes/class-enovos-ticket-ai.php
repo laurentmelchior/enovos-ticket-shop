@@ -362,13 +362,6 @@ final class AI {
         if (!$url || !self::is_likely_artist_image($url, $title) || self::image_is_excluded($url, $excluded_image_urls)) {
             return '';
         }
-        $normalized_url = self::normalize_image_text(rawurldecode($url));
-        if (!array_filter(
-            self::artist_title_tokens($title),
-            static fn(string $token): bool => str_contains($normalized_url, $token)
-        )) {
-            return '';
-        }
         $response = wp_remote_head($url, [
             'timeout' => 20,
             'redirection' => 5,
@@ -437,7 +430,7 @@ final class AI {
         unset($title);
         $lower = strtolower(rawurldecode($url . ' ' . $context));
         foreach ([
-            'logo', 'sponsor', 'cookie', 'icon', 'avatar',
+            'logo', 'sponsor', 'footer', 'cookie', 'icon', 'avatar',
             'ticket', 'qr', 'barcode', 'map',
             'placeholder', 'default-image', 'default_image',
         ] as $bad) {
@@ -465,7 +458,7 @@ final class AI {
             $tokens,
             static fn(string $token): bool => !in_array($token, $stop_words, true)
         ));
-        return $meaningful_tokens ?: $tokens;
+        return $meaningful_tokens;
     }
 
     private static function normalize_image_text(string $value): string {
