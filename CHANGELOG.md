@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 0.7.8 – 2026-09-03
+- Added concert dates and full product descriptions to repeatable new-product email blocks, with compact 100-pixel images and shortened descriptions in the ready-made table.
+- Added Ticketmatic as an exact-event source in AI ticket-price search prompts.
+
 ## Version 0.7.7 – 2026-09-03
 - Added configurable recent-product placeholders and repeatable product blocks to the Beefree email template editor.
 - Added a ready-to-paste daily new products digest example to the email template documentation.

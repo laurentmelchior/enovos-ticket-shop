@@ -37,7 +37,8 @@ namespace {
             private string $image,
             private int $image_id,
             private string $sku,
-            private string $short_description
+            private string $description,
+            private string $concert_date
         ) {
         }
 
@@ -53,8 +54,8 @@ namespace {
             return $this->url;
         }
 
-        public function get_image(string $size): string {
-            unset($size);
+        public function get_image(string $size, array $attributes = []): string {
+            $GLOBALS['test_image_requests'][] = [$size, $attributes];
             return $this->image;
         }
 
@@ -66,8 +67,12 @@ namespace {
             return $this->sku;
         }
 
-        public function get_short_description(): string {
-            return $this->short_description;
+        public function get_description(): string {
+            return $this->description;
+        }
+
+        public function get_meta(string $key): string {
+            return $key === 'date_of_concert' ? $this->concert_date : '';
         }
     }
 
@@ -79,6 +84,7 @@ namespace {
     $GLOBALS['test_options'] = [];
     $GLOBALS['test_products'] = [];
     $GLOBALS['test_product_query'] = [];
+    $GLOBALS['test_image_requests'] = [];
 
     function is_wp_error(mixed $value): bool {
         return $value instanceof WP_Error;
@@ -114,6 +120,7 @@ namespace {
     }
 
     function wp_strip_all_tags(string $value): string {
+        $value = preg_replace('#<(script|style)\b[^>]*>.*?</\1>#is', '', $value) ?? '';
         return strip_tags($value);
     }
 
@@ -496,7 +503,8 @@ HTML;
             '<img src="https://example.test/first.jpg" alt="">',
             101,
             'SKU-1',
-            'First <strong>description</strong>'
+            'First <strong>description</strong> ' . str_repeat('a', 210) . ' FULL-END',
+            '20260924'
         ),
         new \WC_Product(
             'Second product',
@@ -505,13 +513,14 @@ HTML;
             '',
             102,
             'SKU-2',
-            '<script>unsafe()</script>Second description'
+            '<script>unsafe()</script>Second description',
+            '2026-09-25'
         ),
     ];
     $email = new \WC_Email();
     $product_template = '{new_products_count}|{#new_products}'
         . '{product_index}:{product_name}:{product_price}:{product_url}:{product_image_url}:'
-        . '{product_sku}:{product_short_description};{/new_products}'
+        . '{product_sku}:{product_concert_date}:{product_description};{/new_products}'
         . '{#no_new_products}No products{/no_new_products}|{new_products}';
     $rendered_products = invoke_private(EmailTemplateEditor::class, 'format_template', $product_template, $email);
     assert_true(str_starts_with($rendered_products, '2|'), 'The flat product count token must contain the query result count.');
@@ -523,11 +532,47 @@ HTML;
         str_contains($rendered_products, '2:Second product') && !str_contains($rendered_products, 'unsafe()'),
         'Repeated product blocks must render each product and sanitize descriptions.'
     );
+    assert_true(
+        str_contains($rendered_products, 'SKU-1:2026-09-24:')
+        && str_contains($rendered_products, 'SKU-2:2026-09-25:'),
+        'Concert dates in Ymd and Y-m-d formats must be localized consistently.'
+    );
     assert_true(!str_contains($rendered_products, 'No products'), 'The empty-result block must be removed when products exist.');
     assert_true(
         str_contains($rendered_products, '<table role="presentation"')
         && str_contains($rendered_products, 'View product'),
         'The flat new-products token must render the ready-made HTML table.'
+    );
+    assert_same(
+        'woocommerce_gallery_thumbnail',
+        $GLOBALS['test_image_requests'][0][0],
+        'Email product images must use the smaller WooCommerce gallery thumbnail.'
+    );
+    assert_same('100', $GLOBALS['test_image_requests'][0][1]['width'], 'Email product images must be limited to 100 pixels.');
+    assert_true(
+        str_contains($rendered_products, '<strong>Concert date:</strong> 2026-09-24'),
+        'The ready-made product table must display the concert date.'
+    );
+    $first_product_values = invoke_private(
+        EmailTemplateEditor::class,
+        'product_replacement_values',
+        $GLOBALS['test_products'][0],
+        1
+    );
+    assert_true(
+        str_contains($first_product_values['{product_description}'], 'FULL-END'),
+        'The repeated-block product description token must contain the full description.'
+    );
+    $product_table = invoke_private(EmailTemplateEditor::class, 'new_products_html', [$GLOBALS['test_products'][0]]);
+    assert_true(
+        !str_contains($product_table, 'FULL-END') && str_contains($product_table, '…'),
+        'The ready-made product table must truncate long descriptions to 200 characters.'
+    );
+    $undated_product = new \WC_Product('Undated', '', 'https://example.test/undated', '', 0, '', 'Description', '');
+    assert_same(
+        '',
+        invoke_private(EmailTemplateEditor::class, 'concert_date', $undated_product),
+        'Products without a concert date must render an empty date token.'
     );
     assert_same('publish', $GLOBALS['test_product_query']['status'], 'The product query must only include published products.');
     assert_same('catalog', $GLOBALS['test_product_query']['visibility'], 'The product query must exclude catalog-hidden products.');
@@ -543,6 +588,25 @@ HTML;
         . '{#no_new_products}No products{/no_new_products}|{new_products}';
     $rendered_empty = invoke_private(EmailTemplateEditor::class, 'format_template', $empty_template, $email);
     assert_same('0|No products|', $rendered_empty, 'An empty query must remove product output and render its fallback block.');
+
+    $price_prompt = invoke_private(AI::class, 'price_search_prompt', [
+        'title' => 'CAKE',
+        'date' => '2026-09-24',
+        'venue' => 'Rockhal',
+        'atelier_url' => 'https://www.atelier.lu/shows/cake/',
+    ], false);
+    assert_true(
+        str_contains($price_prompt, 'ticketmatic.com'),
+        'The AI price search prompt must identify Ticketmatic as an exact-event price source.'
+    );
+    $atelier_prompt = invoke_private(AI::class, 'atelier_prompt', 'https://www.atelier.lu/shows/cake/', [
+        'title' => 'CAKE',
+        'date' => '2026-09-24',
+    ]);
+    assert_true(
+        str_contains($atelier_prompt, 'ticketmatic.com'),
+        'The Atelier enrichment prompt must identify Ticketmatic as an exact-event price source.'
+    );
 
     echo "All regression tests passed.\n";
 }

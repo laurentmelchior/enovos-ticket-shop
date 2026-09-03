@@ -315,16 +315,20 @@ final class EmailTemplateEditor {
      */
     private static function product_replacement_values(\WC_Product $product, int $index): array {
         $image_id = $product->get_image_id();
-        $image_url = $image_id ? wp_get_attachment_image_url($image_id, 'woocommerce_thumbnail') : false;
+        $image_url = $image_id ? wp_get_attachment_image_url($image_id, 'woocommerce_gallery_thumbnail') : false;
 
         return [
             '{product_name}' => esc_html($product->get_name()),
             '{product_price}' => wp_kses_post($product->get_price_html()),
             '{product_url}' => esc_url($product->get_permalink()),
-            '{product_image}' => wp_kses_post($product->get_image('woocommerce_thumbnail')),
+            '{product_image}' => wp_kses_post($product->get_image('woocommerce_gallery_thumbnail', [
+                'style' => 'display:block;width:100px;max-width:100px;height:auto;',
+                'width' => '100',
+            ])),
             '{product_image_url}' => esc_url(is_string($image_url) ? $image_url : ''),
             '{product_sku}' => esc_html($product->get_sku()),
-            '{product_short_description}' => wp_kses_post(wpautop($product->get_short_description())),
+            '{product_description}' => wp_kses_post(wpautop($product->get_description())),
+            '{product_concert_date}' => self::concert_date($product),
             '{product_index}' => esc_html((string) $index),
         ];
     }
@@ -344,14 +348,22 @@ final class EmailTemplateEditor {
             $rows .= '<tr><td style="padding:16px 0;border-bottom:1px solid #e5e5e5;">';
             $rows .= '<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;" border="0"><tr>';
             if ($image !== '') {
-                $rows .= '<td style="width:120px;vertical-align:top;padding-right:16px;"><a href="'
+                $rows .= '<td style="width:100px;vertical-align:top;padding-right:16px;"><a href="'
                     . $values['{product_url}'] . '" style="text-decoration:none;">' . $image . '</a></td>';
             }
             $rows .= '<td style="vertical-align:top;"><p style="margin:0 0 8px;font-size:16px;font-weight:bold;"><a href="'
                 . $values['{product_url}'] . '" style="color:inherit;text-decoration:none;">'
                 . $values['{product_name}'] . '</a></p>';
+            if ($values['{product_concert_date}'] !== '') {
+                $rows .= '<p style="margin:0 0 8px;"><strong>' . esc_html__('Concert date:', 'enovos-ticket-shop')
+                    . '</strong> ' . $values['{product_concert_date}'] . '</p>';
+            }
             if ($values['{product_price}'] !== '') {
                 $rows .= '<p style="margin:0 0 12px;">' . $values['{product_price}'] . '</p>';
+            }
+            $description = self::description_excerpt($product->get_description());
+            if ($description !== '') {
+                $rows .= '<p style="margin:0 0 12px;">' . esc_html($description) . '</p>';
             }
             $rows .= '<a href="' . $values['{product_url}'] . '" style="display:inline-block;text-decoration:none;">'
                 . esc_html__('View product', 'enovos-ticket-shop') . '</a></td></tr></table></td></tr>';
@@ -359,6 +371,48 @@ final class EmailTemplateEditor {
 
         return '<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;margin:20px 0;" border="0">'
             . $rows . '</table>';
+    }
+
+    private static function concert_date(\WC_Product $product): string {
+        $raw_date = trim((string) $product->get_meta('date_of_concert'));
+        if ($raw_date === '') {
+            return '';
+        }
+
+        $date = false;
+        foreach (['!Ymd', '!Y-m-d'] as $format) {
+            $candidate = \DateTimeImmutable::createFromFormat($format, $raw_date);
+            $output_format = str_replace('!', '', $format);
+            if ($candidate instanceof \DateTimeImmutable && $candidate->format($output_format) === $raw_date) {
+                $date = $candidate;
+                break;
+            }
+        }
+        if (!$date instanceof \DateTimeImmutable) {
+            $timestamp = strtotime($raw_date);
+            if ($timestamp === false) {
+                return '';
+            }
+        } else {
+            $timestamp = $date->getTimestamp();
+        }
+
+        return esc_html(date_i18n((string) get_option('date_format', 'F j, Y'), $timestamp));
+    }
+
+    private static function description_excerpt(string $description): string {
+        $plain_text = trim((string) preg_replace('/\s+/u', ' ', wp_strip_all_tags($description)));
+        if ($plain_text === '') {
+            return '';
+        }
+
+        $length = function_exists('mb_strlen') ? mb_strlen($plain_text) : strlen($plain_text);
+        if ($length <= 200) {
+            return $plain_text;
+        }
+
+        $excerpt = function_exists('mb_substr') ? mb_substr($plain_text, 0, 200) : substr($plain_text, 0, 200);
+        return rtrim($excerpt) . '…';
     }
 
     private static function order_items_html(\WC_Order $order): string {
@@ -445,7 +499,8 @@ final class EmailTemplateEditor {
                 '{product_image}' => __('Product image HTML (inside repeated block)', 'enovos-ticket-shop'),
                 '{product_image_url}' => __('Product image URL (inside repeated block)', 'enovos-ticket-shop'),
                 '{product_sku}' => __('Product SKU (inside repeated block)', 'enovos-ticket-shop'),
-                '{product_short_description}' => __('Product short description (inside repeated block)', 'enovos-ticket-shop'),
+                '{product_description}' => __('Full product description (inside repeated block)', 'enovos-ticket-shop'),
+                '{product_concert_date}' => __('Formatted concert date (inside repeated block)', 'enovos-ticket-shop'),
                 '{product_index}' => __('Product position starting at 1 (inside repeated block)', 'enovos-ticket-shop'),
             ],
             __('Customer', 'enovos-ticket-shop') => [
@@ -492,7 +547,7 @@ final class EmailTemplateEditor {
             '{new_products}', '{new_products_count}', '{new_products_date}',
             '{#new_products}', '{/new_products}', '{#no_new_products}', '{/no_new_products}',
             '{product_name}', '{product_price}', '{product_url}', '{product_image}', '{product_image_url}',
-            '{product_sku}', '{product_short_description}', '{product_index}',
+            '{product_sku}', '{product_description}', '{product_concert_date}', '{product_index}',
         ];
         $object = $email->object ?? null;
         $order_email_ids = [

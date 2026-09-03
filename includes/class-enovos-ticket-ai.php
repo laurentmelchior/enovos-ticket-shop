@@ -1195,7 +1195,7 @@ Rules:
 - Different venues and ticket types can identify different events even when the date is the same. Different ticket types for the same title, date and venue remain one event.
 - The PDF price is NOT the sell price. It may be 0 because tickets are complimentary.
 - Find the concrete concert page on atelier.lu for each event.
-- On that Atelier concert page, determine the current public ticket price for one ticket.
+- Determine the current public ticket price for one ticket from the Atelier concert page or the exact matching event on ticketmatic.com / apps.ticketmatic.com.
 - Use the direct Atelier concert URL.
 - Extract a concise group/concert description from Atelier.
 - Extract a direct public image URL showing the artist or group (preferred), not a ticket graphic, sponsor logo, venue logo, or generic concert poster. Prefer the official Atelier artist/group image when available; otherwise use a credible artist press photo or official artist image.
@@ -1599,7 +1599,7 @@ TXT;
 
     private static function atelier_prompt(string $url, array $event): string {
         return sprintf(
-            "Find and verify the official Atelier Luxembourg concert page for %s on %s. Candidate URL: %s. Return JSON with the current public ticket price for ONE ticket in EUR, a concise description based on Atelier, the main image URL, and the exact official Atelier concert URL. The PDF price must never be used. The price must be current and match the exact event title and date. Never guess or infer a price from unrelated events. If the exact price cannot be verified from the official Atelier event page or the official ticketing page reached from it, return an empty/unknown price. The administrator can review a broader web suggestion or enter the price manually.",
+            "Find and verify the official Atelier Luxembourg concert page for %s on %s. Candidate URL: %s. Return JSON with the current public ticket price for ONE ticket in EUR, a concise description based on Atelier, the main image URL, and the exact official Atelier concert URL. Ticket prices may also be listed on ticketmatic.com or apps.ticketmatic.com; use them only when the page explicitly matches the exact event title and date. The PDF price must never be used. The price must be current and match the exact event title and date. Never guess or infer a price from unrelated events. If the exact price cannot be verified from the official Atelier event page, Ticketmatic, or the official ticketing page reached from Atelier, return an empty/unknown price. The administrator can review a broader web suggestion or enter the price manually.",
             $event['title'] ?? '',
             $event['date'] ?? '',
             $url
@@ -1910,7 +1910,7 @@ TXT;
 
     private static function price_search_prompt(array $event, bool $broader_search): string {
         $base = sprintf(
-            'Find the public price for exactly this concert: %s on %s at %s in Luxembourg. Candidate Atelier URL: %s. The result must match the exact artist or event, date and venue. Return the price for ONE standard ticket in EUR, not a package, fee, resale markup, donation, or another event. Never use the uploaded PDF price and never invent a value.',
+            'Find the public price for exactly this concert: %s on %s at %s in Luxembourg. Candidate Atelier URL: %s. The result must match the exact artist or event, date and venue. Ticket prices may also be listed on ticketmatic.com or apps.ticketmatic.com; treat Ticketmatic as a primary source only when its page explicitly matches this exact concert and date. Return the price for ONE standard ticket in EUR, not a package, fee, resale markup, donation, or another event. Never use the uploaded PDF price and never invent a value.',
             (string) ($event['title'] ?? ''),
             (string) ($event['date'] ?? ''),
             (string) ($event['venue'] ?? ''),
