@@ -22,16 +22,13 @@ final class CustomerApproval {
     private const TOKEN_LIFETIME = 48 * HOUR_IN_SECONDS;
     private const RESEND_LIMIT = 3;
     private const RESEND_WINDOW = 15 * MINUTE_IN_SECONDS;
-    private const REGISTRATION_NOTICE_COOKIE = 'enovos_registration_notice';
     private static bool $registration_notice_rendered = false;
 
     public static function init(): void {
         add_action('woocommerce_created_customer', [self::class, 'created_customer'], 10, 1);
         add_filter('woocommerce_registration_auth_new_customer', [self::class, 'prevent_automatic_login'], 10, 2);
-        add_filter('woocommerce_registration_redirect', [self::class, 'registration_redirect']);
         add_filter('wp_authenticate_user', [self::class, 'check_login'], 10, 2);
         add_action('template_redirect', [self::class, 'handle_frontend_request']);
-        add_filter('the_content', [self::class, 'prepend_registration_confirmation'], 20);
         add_action('woocommerce_after_checkout_validation', [self::class, 'validate_checkout'], 10, 2);
         add_filter('rest_pre_dispatch', [self::class, 'validate_store_api_checkout'], 10, 3);
         add_action('woocommerce_login_form_end', [self::class, 'render_resend_form']);
@@ -59,7 +56,7 @@ final class CustomerApproval {
         update_user_meta($customer_id, self::STATUS_META, self::STATUS_PENDING_EMAIL);
         update_user_meta($customer_id, self::DOMAIN_META, $domain);
         update_user_meta($customer_id, self::WHITELISTED_META, self::domain_is_whitelisted($domain) ? '1' : '0');
-        self::set_registration_notice_cookie();
+        self::override_registration_message();
         self::send_verification($customer_id);
         Logger::log('STEP', 'Customer email verification requested', [
             'user_id' => $customer_id,
@@ -75,11 +72,16 @@ final class CustomerApproval {
         return get_user_meta($customer_id, self::STATUS_META, true) === self::STATUS_APPROVED;
     }
 
-    public static function registration_redirect($redirect): string {
-        if (!self::enabled()) {
-            return is_string($redirect) ? $redirect : self::my_account_url();
-        }
-        return add_query_arg('enovos_registration', 'pending', self::my_account_url());
+    /**
+     * @param mixed $message
+     */
+    public static function registration_message($message): string {
+        unset($message);
+        remove_filter('woocommerce_add_message', [self::class, 'registration_message'], 10);
+        return __(
+            'Your account was created. Please check your inbox and confirm your email address before signing in.',
+            'enovos-ticket-shop'
+        );
     }
 
     /**
@@ -155,32 +157,6 @@ final class CustomerApproval {
         }
     }
 
-    public static function prepend_registration_confirmation(string $content): string {
-        $post_content = function_exists('get_queried_object_id')
-            ? (string) get_post_field('post_content', get_queried_object_id())
-            : '';
-        if (
-            self::$registration_notice_rendered
-            || !self::enabled()
-            || strtoupper((string) ($_SERVER['REQUEST_METHOD'] ?? 'GET')) !== 'GET'
-            || sanitize_key((string) ($_GET['enovos_registration'] ?? '')) !== 'pending'
-            || !function_exists('is_account_page')
-            || !is_account_page()
-            || !is_main_query()
-            || str_contains($post_content, '[enovos_registration_notice')
-            || str_contains($post_content, '[enovos_account_status')
-        ) {
-            return $content;
-        }
-
-        self::$registration_notice_rendered = true;
-        $message = esc_html__(
-            'Your account was created. Please check your inbox and confirm your email address before signing in.',
-            'enovos-ticket-shop'
-        );
-        return '<div class="woocommerce-message" role="alert">' . $message . '</div>' . $content;
-    }
-
     /**
      * @param array<string,mixed>|string $atts
      */
@@ -191,7 +167,7 @@ final class CustomerApproval {
             'debug' => '0',
         ], is_array($atts) ? $atts : [], 'enovos_registration_notice');
         $type = sanitize_key((string) $atts['type']);
-        if (!in_array($type, ['auto', 'registration', 'status'], true)) {
+        if (!in_array($type, ['auto', 'status'], true)) {
             $type = 'auto';
         }
 
@@ -199,15 +175,8 @@ final class CustomerApproval {
             && is_user_logged_in()
             && current_user_can('manage_options');
         $message = '';
-        $registration_pending = sanitize_key((string) ($_GET['enovos_registration'] ?? '')) === 'pending'
-            || sanitize_key((string) ($_COOKIE[self::REGISTRATION_NOTICE_COOKIE] ?? '')) === '1';
 
-        if (self::enabled() && ($type === 'auto' || $type === 'registration') && !is_user_logged_in() && $registration_pending) {
-            $message = __(
-                'Your account was created. Please check your inbox and confirm your email address before signing in.',
-                'enovos-ticket-shop'
-            );
-        } elseif (self::enabled() && ($type === 'auto' || $type === 'status') && is_user_logged_in()) {
+        if (self::enabled() && is_user_logged_in()) {
             $status = (string) get_user_meta(get_current_user_id(), self::STATUS_META, true);
             if ($status === self::STATUS_PENDING_EMAIL) {
                 $message = __('Please confirm your email address before signing in. You can request a new link below.', 'enovos-ticket-shop');
@@ -229,12 +198,10 @@ final class CustomerApproval {
         if ($debug) {
             $status = (string) get_user_meta(get_current_user_id(), self::STATUS_META, true);
             $debug_data = sprintf(
-                'Enovos notice debug: enabled=%s; type=%s; status=%s; query=%s; cookie=%s',
+                'Enovos notice debug: enabled=%s; type=%s; status=%s',
                 self::enabled() ? 'yes' : 'no',
                 $type,
-                $status !== '' ? $status : 'none',
-                sanitize_key((string) ($_GET['enovos_registration'] ?? '')) ?: 'none',
-                sanitize_key((string) ($_COOKIE[self::REGISTRATION_NOTICE_COOKIE] ?? '')) ?: 'none'
+                $status !== '' ? $status : 'none'
             );
             $output .= '<p class="enovos-registration-notice-debug"><small>' . esc_html($debug_data) . '</small></p>';
         }
@@ -250,7 +217,7 @@ final class CustomerApproval {
             'name' => __('Enovos Registration Notice', 'enovos-ticket-shop'),
             'base' => 'enovos_registration_notice',
             'category' => __('WooCommerce', 'enovos-ticket-shop'),
-            'description' => __('Shows the post-registration confirmation on My Account.', 'enovos-ticket-shop'),
+            'description' => __('Shows the Enovos customer account status on My Account.', 'enovos-ticket-shop'),
             'params' => [
                 [
                     'type' => 'dropdown',
@@ -258,7 +225,6 @@ final class CustomerApproval {
                     'param_name' => 'type',
                     'value' => [
                         __('Automatic', 'enovos-ticket-shop') => 'auto',
-                        __('Registration', 'enovos-ticket-shop') => 'registration',
                         __('Account status', 'enovos-ticket-shop') => 'status',
                     ],
                 ],
@@ -551,19 +517,15 @@ final class CustomerApproval {
         return add_query_arg('enovos_verification_resend', '1', self::my_account_url());
     }
 
-    private static function set_registration_notice_cookie(): void {
-        if (headers_sent()) {
+    /**
+     * WooCommerce adds its own registration notice after wc_create_new_customer() returns,
+     * so the replacement filter has to be queued from within the creation hook.
+     */
+    private static function override_registration_message(): void {
+        if (!isset($_POST['register'], $_POST['email'])) {
             return;
         }
-        setcookie(self::REGISTRATION_NOTICE_COOKIE, '1', [
-            'expires' => time() + (15 * MINUTE_IN_SECONDS),
-            'path' => defined('COOKIEPATH') && COOKIEPATH ? COOKIEPATH : '/',
-            'domain' => defined('COOKIE_DOMAIN') ? (string) COOKIE_DOMAIN : '',
-            'secure' => true,
-            'httponly' => true,
-            'samesite' => 'Lax',
-        ]);
-        $_COOKIE[self::REGISTRATION_NOTICE_COOKIE] = '1';
+        add_filter('woocommerce_add_message', [self::class, 'registration_message'], 10);
     }
 
     private static function resend_rate_key(string $email): string {
