@@ -84,6 +84,13 @@ final class EmailTemplateEditor {
         echo '<ul class="enovos-toggle-list">';
         self::render_toggle(!empty($settings['enabled']));
         echo '</ul>';
+        echo '<div class="enovos-new-products-settings">';
+        echo '<p><label for="enovos_new_products_hours"><strong>' . esc_html__('New products time window (hours)', 'enovos-ticket-shop') . '</strong></label><br>';
+        echo '<input type="number" id="enovos_new_products_hours" name="new_products_hours" min="1" max="720" value="' . esc_attr((string) $settings['new_products_hours']) . '"></p>';
+        echo '<p><label for="enovos_new_products_limit"><strong>' . esc_html__('Maximum new products', 'enovos-ticket-shop') . '</strong></label><br>';
+        echo '<input type="number" id="enovos_new_products_limit" name="new_products_limit" min="1" max="50" value="' . esc_attr((string) $settings['new_products_limit']) . '"></p>';
+        echo '<p class="description">' . esc_html__('These values control the new-products placeholders in every custom email template.', 'enovos-ticket-shop') . '</p>';
+        echo '</div>';
         echo '<p><label for="enovos_email_template"><strong>' . esc_html($selected_email->get_title()) . '</strong></label></p>';
         echo '<textarea id="enovos_email_template" name="email_template" class="large-text code enovos-email-template-code" spellcheck="false" placeholder="<!doctype html>">' . esc_textarea($template) . '</textarea>';
         echo '<p class="description">' . esc_html__('An empty field uses the original WooCommerce template. Custom HTML is sent as the complete email body without the WooCommerce header or footer.', 'enovos-ticket-shop') . '</p>';
@@ -105,6 +112,8 @@ final class EmailTemplateEditor {
 
         $settings = self::settings();
         $settings['enabled'] = !empty($_POST['custom_templates_enabled']) ? 1 : 0;
+        $settings['new_products_hours'] = max(1, min(720, absint($_POST['new_products_hours'] ?? 24)));
+        $settings['new_products_limit'] = max(1, min(50, absint($_POST['new_products_limit'] ?? 12)));
         $settings['templates'][$email_id] = wp_unslash((string) ($_POST['email_template'] ?? ''));
         update_option(self::OPTION, $settings, false);
 
@@ -125,7 +134,7 @@ final class EmailTemplateEditor {
     }
 
     /**
-     * @return array{enabled:int,templates:array<string,string>}
+     * @return array{enabled:int,new_products_hours:int,new_products_limit:int,templates:array<string,string>}
      */
     private static function settings(): array {
         $stored = get_option(self::OPTION, []);
@@ -134,6 +143,8 @@ final class EmailTemplateEditor {
         }
         return [
             'enabled' => !empty($stored['enabled']) ? 1 : 0,
+            'new_products_hours' => max(1, min(720, absint($stored['new_products_hours'] ?? 24))),
+            'new_products_limit' => max(1, min(50, absint($stored['new_products_limit'] ?? 12))),
             'templates' => is_array($stored['templates'] ?? null) ? $stored['templates'] : [],
         ];
     }
@@ -156,14 +167,48 @@ final class EmailTemplateEditor {
     }
 
     private static function format_template(string $template, \WC_Email $email): string {
-        $formatted = strtr($template, self::replacement_values($email));
+        $uses_new_products = preg_match(
+            '/\{(?:#|\/)?(?:new_products|no_new_products)(?:_count|_date)?\}|\{product_[a-z_]+\}/',
+            $template
+        ) === 1;
+        $products = $uses_new_products ? self::new_products() : [];
+        $formatted = self::expand_repeatable_blocks($template, $products);
+        $formatted = strtr($formatted, self::replacement_values($email, $products, $uses_new_products));
         return $email->format_string($formatted);
     }
 
     /**
+     * @param list<\WC_Product> $products
+     */
+    private static function expand_repeatable_blocks(string $template, array $products): string {
+        $template = (string) preg_replace_callback(
+            '/\{#new_products\}(.*?)\{\/new_products\}/s',
+            static function (array $matches) use ($products): string {
+                $rendered = '';
+                foreach ($products as $index => $product) {
+                    $rendered .= strtr($matches[1], self::product_replacement_values($product, $index + 1));
+                }
+                return $rendered;
+            },
+            $template
+        );
+
+        return (string) preg_replace_callback(
+            '/\{#no_new_products\}(.*?)\{\/no_new_products\}/s',
+            static fn(array $matches): string => $products === [] ? $matches[1] : '',
+            $template
+        );
+    }
+
+    /**
+     * @param list<\WC_Product> $new_products
      * @return array<string,string>
      */
-    private static function replacement_values(\WC_Email $email): array {
+    private static function replacement_values(
+        \WC_Email $email,
+        array $new_products = [],
+        bool $include_new_products = false
+    ): array {
         $object = $email->object ?? null;
         $order = $object instanceof \WC_Order ? $object : null;
         $user = $object instanceof \WP_User ? $object : null;
@@ -195,7 +240,6 @@ final class EmailTemplateEditor {
         $shop_url = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('shop') : $site_url;
         $login_url = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('myaccount') : $site_url;
         $reset_url = (string) ($native['{set_password_url}'] ?? $native['{reset_password_url}'] ?? '');
-
         $values = [
             '{site_title}' => esc_html((string) get_bloginfo('name')),
             '{site_address}' => esc_url($site_url),
@@ -210,6 +254,16 @@ final class EmailTemplateEditor {
             '{login_url}' => esc_url(is_string($login_url) && $login_url !== '' ? $login_url : $site_url),
             '{reset_password_url}' => esc_url($reset_url),
         ];
+        if ($include_new_products) {
+            $values += [
+                '{new_products}' => self::new_products_html($new_products),
+                '{new_products_count}' => esc_html((string) count($new_products)),
+                '{new_products_date}' => esc_html(date_i18n(
+                    (string) get_option('date_format', 'F j, Y'),
+                    current_time('timestamp')
+                )),
+            ];
+        }
         foreach (['{verification_url}', '{approve_url}', '{reject_url}'] as $url_token) {
             if (isset($native[$url_token])) {
                 $values[$url_token] = esc_url((string) $native[$url_token]);
@@ -248,6 +302,65 @@ final class EmailTemplateEditor {
         return $values;
     }
 
+    /**
+     * @return list<\WC_Product>
+     */
+    private static function new_products(): array {
+        $settings = self::settings();
+        return NewProducts::get_products($settings['new_products_hours'], $settings['new_products_limit']);
+    }
+
+    /**
+     * @return array<string,string>
+     */
+    private static function product_replacement_values(\WC_Product $product, int $index): array {
+        $image_id = $product->get_image_id();
+        $image_url = $image_id ? wp_get_attachment_image_url($image_id, 'woocommerce_thumbnail') : false;
+
+        return [
+            '{product_name}' => esc_html($product->get_name()),
+            '{product_price}' => wp_kses_post($product->get_price_html()),
+            '{product_url}' => esc_url($product->get_permalink()),
+            '{product_image}' => wp_kses_post($product->get_image('woocommerce_thumbnail')),
+            '{product_image_url}' => esc_url(is_string($image_url) ? $image_url : ''),
+            '{product_sku}' => esc_html($product->get_sku()),
+            '{product_short_description}' => wp_kses_post(wpautop($product->get_short_description())),
+            '{product_index}' => esc_html((string) $index),
+        ];
+    }
+
+    /**
+     * @param list<\WC_Product> $products
+     */
+    private static function new_products_html(array $products): string {
+        if ($products === []) {
+            return '';
+        }
+
+        $rows = '';
+        foreach ($products as $index => $product) {
+            $values = self::product_replacement_values($product, $index + 1);
+            $image = $values['{product_image}'];
+            $rows .= '<tr><td style="padding:16px 0;border-bottom:1px solid #e5e5e5;">';
+            $rows .= '<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;" border="0"><tr>';
+            if ($image !== '') {
+                $rows .= '<td style="width:120px;vertical-align:top;padding-right:16px;"><a href="'
+                    . $values['{product_url}'] . '" style="text-decoration:none;">' . $image . '</a></td>';
+            }
+            $rows .= '<td style="vertical-align:top;"><p style="margin:0 0 8px;font-size:16px;font-weight:bold;"><a href="'
+                . $values['{product_url}'] . '" style="color:inherit;text-decoration:none;">'
+                . $values['{product_name}'] . '</a></p>';
+            if ($values['{product_price}'] !== '') {
+                $rows .= '<p style="margin:0 0 12px;">' . $values['{product_price}'] . '</p>';
+            }
+            $rows .= '<a href="' . $values['{product_url}'] . '" style="display:inline-block;text-decoration:none;">'
+                . esc_html__('View product', 'enovos-ticket-shop') . '</a></td></tr></table></td></tr>';
+        }
+
+        return '<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;margin:20px 0;" border="0">'
+            . $rows . '</table>';
+    }
+
     private static function order_items_html(\WC_Order $order): string {
         $rows = '';
         foreach ($order->get_items() as $item) {
@@ -280,6 +393,7 @@ final class EmailTemplateEditor {
         $applicable = self::applicable_placeholders($email);
         echo '<aside class="enovos-placeholder-reference"><h3>' . esc_html__('Shortcodes / placeholders', 'enovos-ticket-shop') . '</h3>';
         echo '<p>' . esc_html__('Click a token to copy it. Highlighted tokens apply to the selected email.', 'enovos-ticket-shop') . '</p>';
+        echo '<p>' . esc_html__('Place product field tokens between {#new_products} and {/new_products}. The enclosed HTML is repeated once per product.', 'enovos-ticket-shop') . '</p>';
         foreach ($groups as $label => $tokens) {
             echo '<h4>' . esc_html($label) . '</h4><ul>';
             foreach ($tokens as $token => $description) {
@@ -316,6 +430,23 @@ final class EmailTemplateEditor {
                 '{store_address}' => __('Store postal address', 'enovos-ticket-shop'),
                 '{store_email}' => __('Store sender email', 'enovos-ticket-shop'),
                 '{shop_url}' => __('Shop page URL', 'enovos-ticket-shop'),
+            ],
+            __('New products', 'enovos-ticket-shop') => [
+                '{new_products}' => __('Complete HTML product table', 'enovos-ticket-shop'),
+                '{new_products_count}' => __('Number of new products', 'enovos-ticket-shop'),
+                '{new_products_date}' => __('Current localized date', 'enovos-ticket-shop'),
+                '{#new_products}' => __('Start repeated product block', 'enovos-ticket-shop'),
+                '{/new_products}' => __('End repeated product block', 'enovos-ticket-shop'),
+                '{#no_new_products}' => __('Start fallback block when no products exist', 'enovos-ticket-shop'),
+                '{/no_new_products}' => __('End fallback block', 'enovos-ticket-shop'),
+                '{product_name}' => __('Product name (inside repeated block)', 'enovos-ticket-shop'),
+                '{product_price}' => __('Formatted product price (inside repeated block)', 'enovos-ticket-shop'),
+                '{product_url}' => __('Product URL (inside repeated block)', 'enovos-ticket-shop'),
+                '{product_image}' => __('Product image HTML (inside repeated block)', 'enovos-ticket-shop'),
+                '{product_image_url}' => __('Product image URL (inside repeated block)', 'enovos-ticket-shop'),
+                '{product_sku}' => __('Product SKU (inside repeated block)', 'enovos-ticket-shop'),
+                '{product_short_description}' => __('Product short description (inside repeated block)', 'enovos-ticket-shop'),
+                '{product_index}' => __('Product position starting at 1 (inside repeated block)', 'enovos-ticket-shop'),
             ],
             __('Customer', 'enovos-ticket-shop') => [
                 '{customer_name}' => __('Customer full or display name', 'enovos-ticket-shop'),
@@ -356,7 +487,13 @@ final class EmailTemplateEditor {
      * @return list<string>
      */
     private static function applicable_placeholders(\WC_Email $email): array {
-        $tokens = ['{site_title}', '{site_address}', '{site_url}', '{store_address}', '{store_email}', '{shop_url}'];
+        $tokens = [
+            '{site_title}', '{site_address}', '{site_url}', '{store_address}', '{store_email}', '{shop_url}',
+            '{new_products}', '{new_products_count}', '{new_products_date}',
+            '{#new_products}', '{/new_products}', '{#no_new_products}', '{/no_new_products}',
+            '{product_name}', '{product_price}', '{product_url}', '{product_image}', '{product_image_url}',
+            '{product_sku}', '{product_short_description}', '{product_index}',
+        ];
         $object = $email->object ?? null;
         $order_email_ids = [
             'new_order', 'cancelled_order', 'failed_order', 'customer_on_hold_order',

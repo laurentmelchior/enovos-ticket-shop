@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 0.7.7 – 2026-09-03
+- Added configurable recent-product placeholders and repeatable product blocks to the Beefree email template editor.
+- Added a ready-to-paste daily new products digest example to the email template documentation.
+
 ## Version 0.7.6 – 2026-09-03
 - Replaced the WooCommerce registration notice text with the email confirmation instruction instead of adding a second banner on the My Account page.
 - Removed the post-registration banner, its notice cookie and its redirect query parameter; the registration notice shortcode and page-builder element now only display the account status.

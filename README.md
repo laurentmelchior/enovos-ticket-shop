@@ -173,6 +173,67 @@ The settings page lists all supported placeholders and highlights those relevant
 
 WooCommerce email variables use `{placeholder}` syntax, not WordPress `[shortcode]` syntax. Placeholders that do not apply to the selected email remain unchanged.
 
+### Daily new products digest
+
+The editor can query recently published, catalog-visible WooCommerce products independently of the selected email. Configure the time window (24 hours by default) and maximum number of products (12 by default) above the template field.
+
+Use `{new_products}` for a ready-made product table, `{new_products_count}` for the result count and `{new_products_date}` for the localized current date. To design each product in Beefree, place HTML between `{#new_products}` and `{/new_products}`. The editor repeats that block for every product and supports `{product_name}`, `{product_price}`, `{product_url}`, `{product_image}`, `{product_image_url}`, `{product_sku}`, `{product_short_description}` and `{product_index}` inside it. Content between `{#no_new_products}` and `{/no_new_products}` is shown only when the query returns no products.
+
+The following complete HTML document can be pasted into the editor and then restyled in Beefree:
+
+```html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>New products from {site_title}</title>
+</head>
+<body style="margin:0; padding:0; background:#f5f5f5;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; background:#f5f5f5;">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; max-width:640px; background:#ffffff;">
+          <tr>
+            <td style="padding:32px; font-family:Arial,sans-serif; color:#222222;">
+              <p style="margin:0 0 16px;">Hi {customer_name},</p>
+              <p style="margin:0 0 20px;">Here are the new products published in our shop:</p>
+
+              {#new_products}
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-bottom:1px solid #e5e5e5;">
+                <tr>
+                  <td style="width:120px; padding:16px 16px 16px 0; vertical-align:top;">
+                    <a href="{product_url}" style="text-decoration:none;">{product_image}</a>
+                  </td>
+                  <td style="padding:16px 0; vertical-align:top;">
+                    <p style="margin:0 0 8px; font-size:16px; font-weight:bold;">
+                      <a href="{product_url}" style="color:inherit; text-decoration:none;">{product_name}</a>
+                    </p>
+                    <p style="margin:0 0 12px;">{product_price}</p>
+                    <a href="{product_url}" style="display:inline-block; text-decoration:none;">View product</a>
+                  </td>
+                </tr>
+              </table>
+              {/new_products}
+
+              {#no_new_products}
+              <p style="margin:20px 0;">There are no new products in the selected time window.</p>
+              {/no_new_products}
+
+              <p style="margin:24px 0 0; font-size:12px; color:#777777;">
+                You receive this email because you opted in to our daily new products digest.
+                Manage your preferences in <a href="{login_url}">your account</a>.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+```
+
 ## WooCommerce delivery
 
 A package is reserved for the order as soon as the order is created. Ticket PDFs are sent only when the order reaches **Completed** (default):
