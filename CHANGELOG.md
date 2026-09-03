@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 0.7.9 – 2026-09-03
+- Added a signed `{unsubscribe_url}` email placeholder and public confirmation form for safely disabling the existing `send_daily_digest` ACF user preference.
+
 ## Version 0.7.8 – 2026-09-03
 - Added concert dates and full product descriptions to repeatable new-product email blocks, with compact 100-pixel images and shortened descriptions in the ready-made table.
 - Added Ticketmatic as an exact-event source in AI ticket-price search prompts.

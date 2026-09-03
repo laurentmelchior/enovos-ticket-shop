@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace {
     define('ABSPATH', __DIR__ . '/');
     define('HOUR_IN_SECONDS', 3600);
+    define('DAY_IN_SECONDS', 86400);
     define('ENOVOS_TICKET_SHOP_VERSION', '0.7.5-test');
 
     final class WP_Error {
@@ -23,9 +24,24 @@ namespace {
         public string $id = 'test_email';
         public mixed $object = null;
         public array $placeholders = [];
+        public bool $customer_email = true;
+        public string $recipient = '';
 
         public function format_string(string $value): string {
             return strtr($value, $this->placeholders);
+        }
+
+        public function get_recipient(): string {
+            return $this->recipient;
+        }
+    }
+
+    class WP_User {
+        public function __construct(
+            public int $ID,
+            public string $user_email,
+            public string $display_name = ''
+        ) {
         }
     }
 
@@ -85,6 +101,9 @@ namespace {
     $GLOBALS['test_products'] = [];
     $GLOBALS['test_product_query'] = [];
     $GLOBALS['test_image_requests'] = [];
+    $GLOBALS['test_users'] = [];
+    $GLOBALS['test_user_meta'] = [];
+    $GLOBALS['test_acf_updates'] = [];
 
     function is_wp_error(mixed $value): bool {
         return $value instanceof WP_Error;
@@ -92,6 +111,14 @@ namespace {
 
     function sanitize_key(string $value): string {
         return preg_replace('/[^a-z0-9_\-]/', '', strtolower($value)) ?? '';
+    }
+
+    function sanitize_text_field(string $value): string {
+        return trim(strip_tags($value));
+    }
+
+    function wp_unslash(string $value): string {
+        return stripslashes($value);
     }
 
     function sanitize_title(string $value): string {
@@ -186,6 +213,50 @@ namespace {
         return 'https://example.test' . $path;
     }
 
+    function add_query_arg(array $args, string $url): string {
+        $separator = str_contains($url, '?') ? '&' : '?';
+        return $url . $separator . http_build_query($args, '', '&', PHP_QUERY_RFC3986);
+    }
+
+    function wp_salt(string $scheme): string {
+        return 'test-salt-' . $scheme;
+    }
+
+    function is_email(string $email): string|false {
+        return filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : false;
+    }
+
+    function get_userdata(int $user_id): WP_User|false {
+        return $GLOBALS['test_users'][$user_id] ?? false;
+    }
+
+    function get_user_by(string $field, string $value): WP_User|false {
+        if ($field !== 'email') {
+            return false;
+        }
+        foreach ($GLOBALS['test_users'] as $user) {
+            if (strcasecmp($user->user_email, $value) === 0) {
+                return $user;
+            }
+        }
+        return false;
+    }
+
+    function get_user_meta(int $user_id, string $key, bool $single = false): mixed {
+        unset($single);
+        return $GLOBALS['test_user_meta'][$user_id][$key] ?? '';
+    }
+
+    function update_user_meta(int $user_id, string $key, mixed $value): bool {
+        $GLOBALS['test_user_meta'][$user_id][$key] = $value;
+        return true;
+    }
+
+    function update_field(string $field_key, mixed $value, string $user_reference): bool {
+        $GLOBALS['test_acf_updates'][] = [$field_key, $value, $user_reference];
+        return true;
+    }
+
     function wc_get_page_permalink(string $page): string {
         return 'https://example.test/' . $page;
     }
@@ -255,6 +326,7 @@ namespace Enovos\TicketShop {
     }
 
     require_once dirname(__DIR__) . '/includes/class-enovos-ticket-ai.php';
+    require_once dirname(__DIR__) . '/includes/class-enovos-digest-unsubscribe.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-new-products.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-email-template-editor.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-ticket-shop.php';
@@ -606,6 +678,84 @@ HTML;
     assert_true(
         str_contains($atelier_prompt, 'ticketmatic.com'),
         'The Atelier enrichment prompt must identify Ticketmatic as an exact-event price source.'
+    );
+
+    $digest_user = new \WP_User(7, 'digest@example.test', 'Digest Customer');
+    $GLOBALS['test_users'][$digest_user->ID] = $digest_user;
+    $GLOBALS['test_user_meta'][$digest_user->ID]['send_daily_digest'] = '1';
+    $unsubscribe_url = DigestUnsubscribe::unsubscribe_url($digest_user);
+    assert_same(
+        '1',
+        $GLOBALS['test_user_meta'][$digest_user->ID]['send_daily_digest'],
+        'Creating or viewing an unsubscribe URL must not change the subscription.'
+    );
+    parse_str((string) parse_url($unsubscribe_url, PHP_URL_QUERY), $unsubscribe_query);
+    $validated_user = invoke_private(
+        DigestUnsubscribe::class,
+        'validate_signature',
+        (int) $unsubscribe_query['user_id'],
+        (int) $unsubscribe_query['expires'],
+        (string) $unsubscribe_query['signature']
+    );
+    assert_same($digest_user, $validated_user, 'A valid unsubscribe signature must resolve the intended user.');
+    assert_same(
+        null,
+        invoke_private(
+            DigestUnsubscribe::class,
+            'validate_signature',
+            $digest_user->ID,
+            (int) $unsubscribe_query['expires'],
+            'tampered' . $unsubscribe_query['signature']
+        ),
+        'A modified unsubscribe signature must be rejected.'
+    );
+    $expired_at = time() - 1;
+    $expired_signature = invoke_private(DigestUnsubscribe::class, 'signature', $digest_user, $expired_at);
+    assert_same(
+        null,
+        invoke_private(DigestUnsubscribe::class, 'validate_signature', $digest_user->ID, $expired_at, $expired_signature),
+        'An expired unsubscribe signature must be rejected.'
+    );
+
+    invoke_private(DigestUnsubscribe::class, 'unsubscribe_user', $digest_user);
+    invoke_private(DigestUnsubscribe::class, 'unsubscribe_user', $digest_user);
+    assert_same(
+        '0',
+        $GLOBALS['test_user_meta'][$digest_user->ID]['send_daily_digest'],
+        'A valid unsubscribe submission must disable the daily digest idempotently.'
+    );
+    assert_same(
+        ['field_6a450c952f711', false, 'user_7'],
+        $GLOBALS['test_acf_updates'][0],
+        'The unsubscribe submission must update the configured ACF user field.'
+    );
+
+    $digest_email = new \WC_Email();
+    $digest_email->object = $digest_user;
+    $rendered_unsubscribe_url = invoke_private(
+        EmailTemplateEditor::class,
+        'format_template',
+        '{unsubscribe_url}',
+        $digest_email
+    );
+    assert_true(
+        str_contains($rendered_unsubscribe_url, 'user_id=7'),
+        'The unsubscribe placeholder must create a URL for the email user.'
+    );
+    $digest_email->object = null;
+    $digest_email->recipient = 'digest@example.test';
+    assert_true(
+        str_contains(
+            invoke_private(EmailTemplateEditor::class, 'format_template', '{unsubscribe_url}', $digest_email),
+            'user_id=7'
+        ),
+        'The unsubscribe placeholder must resolve one registered email recipient as a fallback.'
+    );
+    $digest_email->recipient = 'first@example.test, second@example.test';
+    assert_same(
+        '',
+        invoke_private(EmailTemplateEditor::class, 'format_template', '{unsubscribe_url}', $digest_email),
+        'The unsubscribe placeholder must remain empty when the recipient is ambiguous.'
     );
 
     echo "All regression tests passed.\n";
