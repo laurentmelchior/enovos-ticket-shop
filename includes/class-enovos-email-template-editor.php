@@ -7,6 +7,7 @@ if (!defined('ABSPATH')) {
 
 final class EmailTemplateEditor {
     private const OPTION = 'enovos_ticket_shop_email_templates';
+    private const DEFAULT_LINK_COLOR = '#7f54b3';
     private static ?\WC_Email $active_email = null;
 
     public static function init(): void {
@@ -90,6 +91,9 @@ final class EmailTemplateEditor {
         echo '<p><label for="enovos_new_products_limit"><strong>' . esc_html__('Maximum new products', 'enovos-ticket-shop') . '</strong></label><br>';
         echo '<input type="number" id="enovos_new_products_limit" name="new_products_limit" min="1" max="50" value="' . esc_attr((string) $settings['new_products_limit']) . '"></p>';
         echo '<p class="description">' . esc_html__('These values control the new-products placeholders in every custom email template.', 'enovos-ticket-shop') . '</p>';
+        echo '<p><label for="enovos_link_color"><strong>' . esc_html__('Email link color', 'enovos-ticket-shop') . '</strong></label><br>';
+        echo '<input type="color" id="enovos_link_color" name="link_color" value="' . esc_attr($settings['link_color']) . '"></p>';
+        echo '<p class="description">' . esc_html__('Used by links in the ready-made new-products table and available as {link_color} in custom HTML.', 'enovos-ticket-shop') . '</p>';
         echo '</div>';
         echo '<p><label for="enovos_email_template"><strong>' . esc_html($selected_email->get_title()) . '</strong></label></p>';
         echo '<textarea id="enovos_email_template" name="email_template" class="large-text code enovos-email-template-code" spellcheck="false" placeholder="<!doctype html>">' . esc_textarea($template) . '</textarea>';
@@ -114,6 +118,7 @@ final class EmailTemplateEditor {
         $settings['enabled'] = !empty($_POST['custom_templates_enabled']) ? 1 : 0;
         $settings['new_products_hours'] = max(1, min(720, absint($_POST['new_products_hours'] ?? 24)));
         $settings['new_products_limit'] = max(1, min(50, absint($_POST['new_products_limit'] ?? 12)));
+        $settings['link_color'] = self::sanitize_link_color(wp_unslash((string) ($_POST['link_color'] ?? '')));
         $settings['templates'][$email_id] = wp_unslash((string) ($_POST['email_template'] ?? ''));
         update_option(self::OPTION, $settings, false);
 
@@ -134,7 +139,7 @@ final class EmailTemplateEditor {
     }
 
     /**
-     * @return array{enabled:int,new_products_hours:int,new_products_limit:int,templates:array<string,string>}
+     * @return array{enabled:int,new_products_hours:int,new_products_limit:int,link_color:string,templates:array<string,string>}
      */
     private static function settings(): array {
         $stored = get_option(self::OPTION, []);
@@ -145,8 +150,23 @@ final class EmailTemplateEditor {
             'enabled' => !empty($stored['enabled']) ? 1 : 0,
             'new_products_hours' => max(1, min(720, absint($stored['new_products_hours'] ?? 24))),
             'new_products_limit' => max(1, min(50, absint($stored['new_products_limit'] ?? 12))),
+            'link_color' => self::sanitize_link_color((string) ($stored['link_color'] ?? '')),
             'templates' => is_array($stored['templates'] ?? null) ? $stored['templates'] : [],
         ];
+    }
+
+    private static function sanitize_link_color(string $value): string {
+        $value = trim($value);
+        if (!preg_match('/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/', $value)) {
+            $value = trim((string) get_option('woocommerce_email_base_color', self::DEFAULT_LINK_COLOR));
+        }
+        if (!preg_match('/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/', $value)) {
+            $value = self::DEFAULT_LINK_COLOR;
+        }
+        if (strlen($value) === 4) {
+            $value = '#' . $value[1] . $value[1] . $value[2] . $value[2] . $value[3] . $value[3];
+        }
+        return strtolower($value);
     }
 
     /**
@@ -241,6 +261,7 @@ final class EmailTemplateEditor {
         $login_url = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('myaccount') : $site_url;
         $reset_url = (string) ($native['{set_password_url}'] ?? $native['{reset_password_url}'] ?? '');
         $email_user = self::email_user($email, $order, $user);
+        $link_color = self::settings()['link_color'];
         $values = [
             '{site_title}' => esc_html((string) get_bloginfo('name')),
             '{site_address}' => esc_url($site_url),
@@ -248,6 +269,7 @@ final class EmailTemplateEditor {
             '{store_address}' => esc_html(implode(', ', $store_address)),
             '{store_email}' => sanitize_email((string) get_option('woocommerce_email_from_address', get_option('admin_email'))),
             '{shop_url}' => esc_url(is_string($shop_url) && $shop_url !== '' ? $shop_url : $site_url),
+            '{link_color}' => esc_attr($link_color),
             '{customer_name}' => esc_html($customer_name),
             '{customer_email}' => sanitize_email($customer_email),
             '{customer_first_name}' => esc_html($first_name),
@@ -371,6 +393,7 @@ final class EmailTemplateEditor {
             return '';
         }
 
+        $link_color = esc_attr(self::settings()['link_color']);
         $rows = '';
         foreach ($products as $index => $product) {
             $values = self::product_replacement_values($product, $index + 1);
@@ -382,7 +405,7 @@ final class EmailTemplateEditor {
                     . $values['{product_url}'] . '" style="text-decoration:none;">' . $image . '</a></td>';
             }
             $rows .= '<td style="vertical-align:top;"><p style="margin:0 0 8px;font-size:16px;font-weight:bold;"><a href="'
-                . $values['{product_url}'] . '" style="color:inherit;text-decoration:none;">'
+                . $values['{product_url}'] . '" style="color:' . $link_color . ';text-decoration:none;">'
                 . $values['{product_name}'] . '</a></p>';
             if ($values['{product_concert_date}'] !== '') {
                 $rows .= '<p style="margin:0 0 8px;"><strong>' . esc_html__('Concert date:', 'enovos-ticket-shop')
@@ -395,7 +418,8 @@ final class EmailTemplateEditor {
             if ($description !== '') {
                 $rows .= '<p style="margin:0 0 12px;">' . esc_html($description) . '</p>';
             }
-            $rows .= '<a href="' . $values['{product_url}'] . '" style="display:inline-block;text-decoration:none;">'
+            $rows .= '<a href="' . $values['{product_url}'] . '" style="display:inline-block;color:' . $link_color
+                . ';text-decoration:none;">'
                 . esc_html__('View product', 'enovos-ticket-shop') . '</a></td></tr></table></td></tr>';
         }
 
@@ -514,6 +538,7 @@ final class EmailTemplateEditor {
                 '{store_address}' => __('Store postal address', 'enovos-ticket-shop'),
                 '{store_email}' => __('Store sender email', 'enovos-ticket-shop'),
                 '{shop_url}' => __('Shop page URL', 'enovos-ticket-shop'),
+                '{link_color}' => __('Configured email link color', 'enovos-ticket-shop'),
             ],
             __('New products', 'enovos-ticket-shop') => [
                 '{new_products}' => __('Complete HTML product table', 'enovos-ticket-shop'),
@@ -575,6 +600,7 @@ final class EmailTemplateEditor {
     private static function applicable_placeholders(\WC_Email $email): array {
         $tokens = [
             '{site_title}', '{site_address}', '{site_url}', '{store_address}', '{store_email}', '{shop_url}',
+            '{link_color}',
             '{new_products}', '{new_products_count}', '{new_products_date}',
             '{#new_products}', '{/new_products}', '{#no_new_products}', '{/no_new_products}',
             '{product_name}', '{product_price}', '{product_url}', '{product_image}', '{product_image_url}',
