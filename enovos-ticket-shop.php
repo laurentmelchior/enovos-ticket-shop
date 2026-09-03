@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Enovos WooCommerce Addons
  * Description: Adds ticket importing, protected ticket delivery, and customer approval workflows to WooCommerce.
- * Version: 0.7.6
+ * Version: 0.7.7
  * Author: Enovos Digital Marketing / Bromance INC
  * Requires at least: 6.4
  * Requires PHP: 8.0
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('ENOVOS_TICKET_SHOP_VERSION', '0.7.6');
+define('ENOVOS_TICKET_SHOP_VERSION', '0.7.7');
 define('ENOVOS_TICKET_SHOP_FILE', __FILE__);
 define('ENOVOS_TICKET_SHOP_DIR', plugin_dir_path(__FILE__));
 define('ENOVOS_TICKET_SHOP_URL', plugin_dir_url(__FILE__));
@@ -27,6 +27,7 @@ if (is_readable($enovos_ticket_shop_autoload)) {
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-logger.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-customer-approval.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-customer-approval-admin.php';
+require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-new-products.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-email-template-editor.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-shop.php';
 require_once ENOVOS_TICKET_SHOP_DIR . 'includes/class-enovos-ticket-pdf.php';

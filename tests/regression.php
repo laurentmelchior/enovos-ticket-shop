@@ -19,11 +19,66 @@ namespace {
         }
     }
 
+    class WC_Email {
+        public string $id = 'test_email';
+        public mixed $object = null;
+        public array $placeholders = [];
+
+        public function format_string(string $value): string {
+            return strtr($value, $this->placeholders);
+        }
+    }
+
+    class WC_Product {
+        public function __construct(
+            private string $name,
+            private string $price,
+            private string $url,
+            private string $image,
+            private int $image_id,
+            private string $sku,
+            private string $short_description
+        ) {
+        }
+
+        public function get_name(): string {
+            return $this->name;
+        }
+
+        public function get_price_html(): string {
+            return $this->price;
+        }
+
+        public function get_permalink(): string {
+            return $this->url;
+        }
+
+        public function get_image(string $size): string {
+            unset($size);
+            return $this->image;
+        }
+
+        public function get_image_id(): int {
+            return $this->image_id;
+        }
+
+        public function get_sku(): string {
+            return $this->sku;
+        }
+
+        public function get_short_description(): string {
+            return $this->short_description;
+        }
+    }
+
     $GLOBALS['test_transients'] = [];
     $GLOBALS['test_http_get'] = [];
     $GLOBALS['test_http_head'] = [];
     $GLOBALS['test_http_post'] = [];
     $GLOBALS['test_http_calls'] = [];
+    $GLOBALS['test_options'] = [];
+    $GLOBALS['test_products'] = [];
+    $GLOBALS['test_product_query'] = [];
 
     function is_wp_error(mixed $value): bool {
         return $value instanceof WP_Error;
@@ -60,6 +115,76 @@ namespace {
 
     function wp_strip_all_tags(string $value): string {
         return strip_tags($value);
+    }
+
+    function absint(mixed $value): int {
+        return abs((int) $value);
+    }
+
+    function get_option(string $name, mixed $default = false): mixed {
+        return $GLOBALS['test_options'][$name] ?? $default;
+    }
+
+    function esc_html(string $value): string {
+        return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    function esc_html__(string $value, string $domain = ''): string {
+        unset($domain);
+        return esc_html($value);
+    }
+
+    function __(string $value, string $domain = ''): string {
+        unset($domain);
+        return $value;
+    }
+
+    function esc_url(string $value): string {
+        return filter_var($value, FILTER_VALIDATE_URL) ? htmlspecialchars($value, ENT_QUOTES, 'UTF-8') : '';
+    }
+
+    function wp_kses_post(string $value): string {
+        return preg_replace('#<script\b[^>]*>.*?</script>#is', '', $value) ?? '';
+    }
+
+    function wpautop(string $value): string {
+        return $value === '' ? '' : '<p>' . $value . '</p>';
+    }
+
+    function wp_get_attachment_image_url(int $image_id, string $size): string|false {
+        unset($size);
+        return $image_id > 0 ? 'https://example.test/media/' . $image_id . '.jpg' : false;
+    }
+
+    function wc_get_products(array $query): array {
+        $GLOBALS['test_product_query'] = $query;
+        return $GLOBALS['test_products'];
+    }
+
+    function current_time(string $type): int {
+        unset($type);
+        return 1_788_390_000;
+    }
+
+    function date_i18n(string $format, int $timestamp): string {
+        return gmdate($format, $timestamp);
+    }
+
+    function get_bloginfo(string $show): string {
+        unset($show);
+        return 'Example Shop';
+    }
+
+    function home_url(string $path = ''): string {
+        return 'https://example.test' . $path;
+    }
+
+    function wc_get_page_permalink(string $page): string {
+        return 'https://example.test/' . $page;
+    }
+
+    function sanitize_email(string $value): string {
+        return filter_var($value, FILTER_SANITIZE_EMAIL);
     }
 
     function wp_json_encode(mixed $value): string|false {
@@ -123,6 +248,8 @@ namespace Enovos\TicketShop {
     }
 
     require_once dirname(__DIR__) . '/includes/class-enovos-ticket-ai.php';
+    require_once dirname(__DIR__) . '/includes/class-enovos-new-products.php';
+    require_once dirname(__DIR__) . '/includes/class-enovos-email-template-editor.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-ticket-shop.php';
 
     function invoke_private(string $class, string $method, mixed ...$arguments): mixed {
@@ -353,6 +480,69 @@ HTML;
         []
     );
     assert_same('', $reviewed['atelier_url'], 'An empty reviewed import field must clear the Atelier URL.');
+
+    $GLOBALS['test_options']['enovos_ticket_shop_email_templates'] = [
+        'enabled' => 1,
+        'new_products_hours' => 24,
+        'new_products_limit' => 12,
+        'templates' => [],
+    ];
+    $GLOBALS['test_options']['date_format'] = 'Y-m-d';
+    $GLOBALS['test_products'] = [
+        new \WC_Product(
+            '<script>alert(1)</script>First product',
+            '<span class="amount">10 EUR</span>',
+            'https://example.test/product/first',
+            '<img src="https://example.test/first.jpg" alt="">',
+            101,
+            'SKU-1',
+            'First <strong>description</strong>'
+        ),
+        new \WC_Product(
+            'Second product',
+            '<span class="amount">20 EUR</span>',
+            'https://example.test/product/second',
+            '',
+            102,
+            'SKU-2',
+            '<script>unsafe()</script>Second description'
+        ),
+    ];
+    $email = new \WC_Email();
+    $product_template = '{new_products_count}|{#new_products}'
+        . '{product_index}:{product_name}:{product_price}:{product_url}:{product_image_url}:'
+        . '{product_sku}:{product_short_description};{/new_products}'
+        . '{#no_new_products}No products{/no_new_products}|{new_products}';
+    $rendered_products = invoke_private(EmailTemplateEditor::class, 'format_template', $product_template, $email);
+    assert_true(str_starts_with($rendered_products, '2|'), 'The flat product count token must contain the query result count.');
+    assert_true(
+        str_contains($rendered_products, '1:&lt;script&gt;alert(1)&lt;/script&gt;First product'),
+        'Repeated product blocks must escape product names.'
+    );
+    assert_true(
+        str_contains($rendered_products, '2:Second product') && !str_contains($rendered_products, 'unsafe()'),
+        'Repeated product blocks must render each product and sanitize descriptions.'
+    );
+    assert_true(!str_contains($rendered_products, 'No products'), 'The empty-result block must be removed when products exist.');
+    assert_true(
+        str_contains($rendered_products, '<table role="presentation"')
+        && str_contains($rendered_products, 'View product'),
+        'The flat new-products token must render the ready-made HTML table.'
+    );
+    assert_same('publish', $GLOBALS['test_product_query']['status'], 'The product query must only include published products.');
+    assert_same('catalog', $GLOBALS['test_product_query']['visibility'], 'The product query must exclude catalog-hidden products.');
+    assert_same(12, $GLOBALS['test_product_query']['limit'], 'The configured product limit must reach the query.');
+    assert_true(
+        str_starts_with($GLOBALS['test_product_query']['date_created'], '>'),
+        'The product query must include a lower creation-date boundary.'
+    );
+
+    $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['new_products_hours'] = 25;
+    $GLOBALS['test_products'] = [];
+    $empty_template = '{new_products_count}|{#new_products}{product_name}{/new_products}'
+        . '{#no_new_products}No products{/no_new_products}|{new_products}';
+    $rendered_empty = invoke_private(EmailTemplateEditor::class, 'format_template', $empty_template, $email);
+    assert_same('0|No products|', $rendered_empty, 'An empty query must remove product output and render its fallback block.');
 
     echo "All regression tests passed.\n";
 }
