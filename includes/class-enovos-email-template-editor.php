@@ -414,10 +414,6 @@ final class EmailTemplateEditor {
             if ($values['{product_price}'] !== '') {
                 $rows .= '<p style="margin:0 0 12px;">' . $values['{product_price}'] . '</p>';
             }
-            $description = self::description_excerpt($product->get_description());
-            if ($description !== '') {
-                $rows .= '<p style="margin:0 0 12px;">' . esc_html($description) . '</p>';
-            }
             $rows .= '<a href="' . $values['{product_url}'] . '" style="display:inline-block;color:' . $link_color
                 . ';text-decoration:none;">'
                 . esc_html__('View product', 'enovos-ticket-shop') . '</a></td></tr></table></td></tr>';
@@ -452,21 +448,6 @@ final class EmailTemplateEditor {
         }
 
         return esc_html(date_i18n((string) get_option('date_format', 'F j, Y'), $timestamp));
-    }
-
-    private static function description_excerpt(string $description): string {
-        $plain_text = trim((string) preg_replace('/\s+/u', ' ', wp_strip_all_tags($description)));
-        if ($plain_text === '') {
-            return '';
-        }
-
-        $length = function_exists('mb_strlen') ? mb_strlen($plain_text) : strlen($plain_text);
-        if ($length <= 200) {
-            return $plain_text;
-        }
-
-        $excerpt = function_exists('mb_substr') ? mb_substr($plain_text, 0, 200) : substr($plain_text, 0, 200);
-        return rtrim($excerpt) . '…';
     }
 
     private static function order_items_html(\WC_Order $order): string {

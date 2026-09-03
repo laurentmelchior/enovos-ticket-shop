@@ -675,8 +675,8 @@ HTML;
     );
     $product_table = invoke_private(EmailTemplateEditor::class, 'new_products_html', [$GLOBALS['test_products'][0]]);
     assert_true(
-        !str_contains($product_table, 'FULL-END') && str_contains($product_table, '…'),
-        'The ready-made product table must truncate long descriptions to 200 characters.'
+        !str_contains($product_table, 'FULL-END') && !str_contains($product_table, 'First description'),
+        'The ready-made product table must omit product descriptions.'
     );
     $undated_product = new \WC_Product('Undated', '', 'https://example.test/undated', '', 0, '', 'Description', '');
     assert_same(

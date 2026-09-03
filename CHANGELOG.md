@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 0.7.11 – 2026-09-03
+- Removed product descriptions from the ready-made `{new_products}` email table.
+
 ## Version 0.7.10 – 2026-09-03
 - Added a configurable link color for the ready-made new-products email table and the `{link_color}` Beefree placeholder.
 
