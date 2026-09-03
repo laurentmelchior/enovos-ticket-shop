@@ -240,6 +240,7 @@ final class EmailTemplateEditor {
         $shop_url = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('shop') : $site_url;
         $login_url = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('myaccount') : $site_url;
         $reset_url = (string) ($native['{set_password_url}'] ?? $native['{reset_password_url}'] ?? '');
+        $email_user = self::email_user($email, $order, $user);
         $values = [
             '{site_title}' => esc_html((string) get_bloginfo('name')),
             '{site_address}' => esc_url($site_url),
@@ -253,6 +254,9 @@ final class EmailTemplateEditor {
             '{customer_last_name}' => esc_html($last_name),
             '{login_url}' => esc_url(is_string($login_url) && $login_url !== '' ? $login_url : $site_url),
             '{reset_password_url}' => esc_url($reset_url),
+            '{unsubscribe_url}' => $email_user instanceof \WP_User
+                ? esc_url(DigestUnsubscribe::unsubscribe_url($email_user))
+                : '',
         ];
         if ($include_new_products) {
             $values += [
@@ -300,6 +304,32 @@ final class EmailTemplateEditor {
             ];
         }
         return $values;
+    }
+
+    private static function email_user(
+        \WC_Email $email,
+        ?\WC_Order $order,
+        ?\WP_User $user
+    ): ?\WP_User {
+        if ($user instanceof \WP_User) {
+            return $user;
+        }
+        if ($order instanceof \WC_Order && $order->get_customer_id() > 0) {
+            $order_user = get_userdata($order->get_customer_id());
+            if ($order_user instanceof \WP_User) {
+                return $order_user;
+            }
+        }
+
+        $recipients = array_values(array_filter(array_map(
+            'trim',
+            preg_split('/[,;]+/', $email->get_recipient()) ?: []
+        )));
+        if (count($recipients) !== 1 || !is_email($recipients[0])) {
+            return null;
+        }
+        $recipient_user = get_user_by('email', $recipients[0]);
+        return $recipient_user instanceof \WP_User ? $recipient_user : null;
     }
 
     /**
@@ -528,6 +558,7 @@ final class EmailTemplateEditor {
             __('Account', 'enovos-ticket-shop') => [
                 '{login_url}' => __('My account URL', 'enovos-ticket-shop'),
                 '{reset_password_url}' => __('Password setup/reset URL when available', 'enovos-ticket-shop'),
+                '{unsubscribe_url}' => __('Signed daily digest unsubscribe URL', 'enovos-ticket-shop'),
             ],
             __('Enovos approval', 'enovos-ticket-shop') => [
                 '{verification_url}' => __('Email verification URL', 'enovos-ticket-shop'),
@@ -565,13 +596,14 @@ final class EmailTemplateEditor {
         }
         if (
             $object instanceof \WP_User
+            || !empty($email->customer_email)
             || in_array($email->id, $order_email_ids, true)
             || str_contains($email->id, 'customer_new_account')
             || str_contains($email->id, 'reset_password')
         ) {
             $tokens = array_merge($tokens, [
                 '{customer_name}', '{customer_email}', '{customer_first_name}', '{customer_last_name}',
-                '{login_url}', '{reset_password_url}',
+                '{login_url}', '{reset_password_url}', '{unsubscribe_url}',
             ]);
         }
         $enovos_tokens = [

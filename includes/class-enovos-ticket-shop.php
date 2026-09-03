@@ -79,6 +79,7 @@ final class Plugin {
         add_action('enovos_ticket_shop_sync_attach_me', ['\Enovos\TicketShop\AttachMe', 'handle_scheduled'], 10, 1);
         CustomerApproval::init();
         CustomerApprovalAdmin::init();
+        DigestUnsubscribe::init();
         EmailTemplateEditor::init();
         if (self::enabled('enable_order_ticket_box')) {
             OrderTickets::init();

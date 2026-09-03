@@ -178,7 +178,9 @@ WooCommerce email variables use `{placeholder}` syntax, not WordPress `[shortcod
 
 The editor can query recently published, catalog-visible WooCommerce products independently of the selected email. Configure the time window (24 hours by default) and maximum number of products (12 by default) above the template field.
 
-Use `{new_products}` for a ready-made product table, `{new_products_count}` for the result count and `{new_products_date}` for the localized current date. To design each product in Beefree, place HTML between `{#new_products}` and `{/new_products}`. The editor repeats that block for every product and supports `{product_name}`, `{product_price}`, `{product_url}`, `{product_image}`, `{product_image_url}`, `{product_sku}`, `{product_description}`, `{product_concert_date}` and `{product_index}` inside it. `{product_description}` contains the complete WooCommerce product description; the ready-made table shortens it to 200 characters. Content between `{#no_new_products}` and `{/no_new_products}` is shown only when the query returns no products.
+The existing customer ACF field `send_daily_digest` (`field_6a450c952f711`) remains the subscription source. The Child Theme sender must select only users whose field value is enabled. The plugin does not subscribe customers automatically.
+
+Use `{new_products}` for a ready-made product table, `{new_products_count}` for the result count and `{new_products_date}` for the localized current date. To design each product in Beefree, place HTML between `{#new_products}` and `{/new_products}`. The editor repeats that block for every product and supports `{product_name}`, `{product_price}`, `{product_url}`, `{product_image}`, `{product_image_url}`, `{product_sku}`, `{product_description}`, `{product_concert_date}` and `{product_index}` inside it. `{product_description}` contains the complete WooCommerce product description; the ready-made table shortens it to 200 characters. Content between `{#no_new_products}` and `{/no_new_products}` is shown only when the query returns no products. Add `{unsubscribe_url}` to the digest email to provide a signed link valid for 30 days. The link opens a public confirmation form; viewing the link alone never changes the subscription.
 
 The following complete HTML document can be pasted into the editor and then restyled in Beefree:
 
@@ -225,7 +227,7 @@ The following complete HTML document can be pasted into the editor and then rest
 
               <p style="margin:24px 0 0; font-size:12px; color:#777777;">
                 You receive this email because you opted in to our daily new products digest.
-                Manage your preferences in <a href="{login_url}">your account</a>.
+                <a href="{unsubscribe_url}">Unsubscribe from this digest</a>.
               </p>
             </td>
           </tr>
