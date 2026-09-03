@@ -22,6 +22,7 @@ WordPress / WooCommerce plugin for importing concert ticket PDFs into products a
 - Products are Simple Products, stock managed, Sold individually, and assigned to product category `den-atelier`.
 - Products use the `VAT 3%` tax class.
 - An Atelier concert URL is accepted only when its page date exactly matches the date extracted from the PDF.
+- AI price verification also checks exact-event listings on `ticketmatic.com` and `apps.ticketmatic.com`; a Ticketmatic price is accepted only when the concert title and date match.
 - Featured images are taken from the header metadata or hero area of that date-matched Atelier page. Official `apps.ticketmatic.com` images embedded there are accepted; arbitrary AI-supplied Ticketmatic URLs are not. Generic assets are rejected, every image is verified as downloadable, and the same image is not reused for different concerts in one import.
 
 ## AI provider
@@ -177,7 +178,7 @@ WooCommerce email variables use `{placeholder}` syntax, not WordPress `[shortcod
 
 The editor can query recently published, catalog-visible WooCommerce products independently of the selected email. Configure the time window (24 hours by default) and maximum number of products (12 by default) above the template field.
 
-Use `{new_products}` for a ready-made product table, `{new_products_count}` for the result count and `{new_products_date}` for the localized current date. To design each product in Beefree, place HTML between `{#new_products}` and `{/new_products}`. The editor repeats that block for every product and supports `{product_name}`, `{product_price}`, `{product_url}`, `{product_image}`, `{product_image_url}`, `{product_sku}`, `{product_short_description}` and `{product_index}` inside it. Content between `{#no_new_products}` and `{/no_new_products}` is shown only when the query returns no products.
+Use `{new_products}` for a ready-made product table, `{new_products_count}` for the result count and `{new_products_date}` for the localized current date. To design each product in Beefree, place HTML between `{#new_products}` and `{/new_products}`. The editor repeats that block for every product and supports `{product_name}`, `{product_price}`, `{product_url}`, `{product_image}`, `{product_image_url}`, `{product_sku}`, `{product_description}`, `{product_concert_date}` and `{product_index}` inside it. `{product_description}` contains the complete WooCommerce product description; the ready-made table shortens it to 200 characters. Content between `{#no_new_products}` and `{/no_new_products}` is shown only when the query returns no products.
 
 The following complete HTML document can be pasted into the editor and then restyled in Beefree:
 
@@ -202,14 +203,16 @@ The following complete HTML document can be pasted into the editor and then rest
               {#new_products}
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="width:100%; border-bottom:1px solid #e5e5e5;">
                 <tr>
-                  <td style="width:120px; padding:16px 16px 16px 0; vertical-align:top;">
+                  <td style="width:100px; padding:16px 16px 16px 0; vertical-align:top;">
                     <a href="{product_url}" style="text-decoration:none;">{product_image}</a>
                   </td>
                   <td style="padding:16px 0; vertical-align:top;">
                     <p style="margin:0 0 8px; font-size:16px; font-weight:bold;">
                       <a href="{product_url}" style="color:inherit; text-decoration:none;">{product_name}</a>
                     </p>
+                    <p style="margin:0 0 8px;"><strong>Concert date:</strong> {product_concert_date}</p>
                     <p style="margin:0 0 12px;">{product_price}</p>
+                    <div style="margin:0 0 12px;">{product_description}</div>
                     <a href="{product_url}" style="display:inline-block; text-decoration:none;">View product</a>
                   </td>
                 </tr>
