@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 0.7.6 – 2026-09-03
+- Replaced the WooCommerce registration notice text with the email confirmation instruction instead of adding a second banner on the My Account page.
+- Removed the post-registration banner, its notice cookie and its redirect query parameter; the registration notice shortcode and page-builder element now only display the account status.
+
 ## Version 0.7.5 – 2026-09-02
 - Read current concert URLs from Atelier's dedicated `ate_show-sitemap.xml` before generic sitemap fallbacks.
 - Made the Atelier URL editable in the import check and safely retained administrator-entered links when Cloudflare or network errors prevent verification.

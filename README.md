@@ -135,17 +135,17 @@ Pending and rejected accounts cannot sign in or check out. Rejected accounts rem
 
 Manage waiting accounts under **WooCommerce > Pending Customers**. Administrators can directly approve or reject verified customers, or resend a verification message to customers who have not confirmed their email. Administrator emails contain separate Approve and Reject links. Each link requires a WordPress login and a POST confirmation, so email security scanners cannot change an account status.
 
-After registration, the My Account page displays a confirmation banner asking the customer to check their email. **WordPress > Users** shows a Customer status column with **Email not confirmed**, **Pending**, **Approved** or **Rejected**. Users created before this workflow and users outside it show no Enovos status.
+After registration, the standard WooCommerce notice on the My Account page asks the customer to check their inbox and confirm the email address. **WordPress > Users** shows a Customer status column with **Email not confirmed**, **Pending**, **Approved** or **Rejected**. Users created before this workflow and users outside it show no Enovos status.
 
-### Registration notice shortcode
+### Account status shortcode
 
-For Impreza/WPBakery layouts, edit the WooCommerce My Account page and add the **Enovos Registration Notice** element directly above the element or text block containing `[woocommerce_my_account]`. Alternatively, add this shortcode in a WPBakery text block:
+The post-registration confirmation needs no shortcode; it is the WooCommerce notice. For Impreza/WPBakery layouts that additionally display the Enovos status of a signed-in customer, add the **Enovos Registration Notice** element above the element or text block containing `[woocommerce_my_account]`, or add this shortcode in a WPBakery text block:
 
 ```
 [enovos_registration_notice]
 ```
 
-The default `type="auto"` displays the post-registration confirmation or the current Enovos account status when applicable. `type="registration"` and `type="status"` restrict the output. Administrators can temporarily use `debug="1"` to display the notice inputs without exposing them to customers. Exclude the My Account page from full-page caching so its query string and customer-specific state are preserved.
+Both `type="auto"` (default) and `type="status"` display the current Enovos account status when applicable. Administrators can temporarily use `debug="1"` to display the notice inputs without exposing them to customers. Exclude the My Account page from full-page caching so customer-specific state is preserved.
 
 Enter one exact domain per line in the whitelist without `@`. A domain does not include its subdomains: for example, `company.com` does not match `shop.company.com`. Approval notification recipients are configurable; when left empty, the WordPress administration email is used.
 
