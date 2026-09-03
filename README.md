@@ -165,9 +165,11 @@ Open **Enovos WooCommerce Addons > Settings > Email Templates** to optionally re
 
 Custom templates apply to emails configured as HTML. They are sent as the complete document without an additional WooCommerce header or footer. Existing email recipients, subjects and attachments are unchanged, including Enovos ticket PDF attachments.
 
+The **Email link color** field controls text links in the ready-made `{new_products}` table. Its default follows the WooCommerce email base color. Use `{link_color}` in Beefree HTML to apply the same color to custom links.
+
 The settings page lists all supported placeholders and highlights those relevant to the selected email. Click a placeholder to copy it into Beefree. Common examples are:
 
-- Shop and customer: `{site_title}`, `{site_url}`, `{store_address}`, `{customer_name}`, `{customer_email}`
+- Shop and customer: `{site_title}`, `{site_url}`, `{store_address}`, `{link_color}`, `{customer_name}`, `{customer_email}`
 - Orders: `{order_number}`, `{order_date}`, `{order_total}`, `{billing_address}`, `{view_order_url}`, `{order_items}`
 - Accounts: `{login_url}`, `{reset_password_url}`
 - Approval: `{verification_url}`, `{customer_domain}`, `{approve_url}`, `{reject_url}`
@@ -210,12 +212,12 @@ The following complete HTML document can be pasted into the editor and then rest
                   </td>
                   <td style="padding:16px 0; vertical-align:top;">
                     <p style="margin:0 0 8px; font-size:16px; font-weight:bold;">
-                      <a href="{product_url}" style="color:inherit; text-decoration:none;">{product_name}</a>
+                      <a href="{product_url}" style="color:{link_color}; text-decoration:none;">{product_name}</a>
                     </p>
                     <p style="margin:0 0 8px;"><strong>Concert date:</strong> {product_concert_date}</p>
                     <p style="margin:0 0 12px;">{product_price}</p>
                     <div style="margin:0 0 12px;">{product_description}</div>
-                    <a href="{product_url}" style="display:inline-block; text-decoration:none;">View product</a>
+                    <a href="{product_url}" style="display:inline-block; color:{link_color}; text-decoration:none;">View product</a>
                   </td>
                 </tr>
               </table>
@@ -227,7 +229,7 @@ The following complete HTML document can be pasted into the editor and then rest
 
               <p style="margin:24px 0 0; font-size:12px; color:#777777;">
                 You receive this email because you opted in to our daily new products digest.
-                <a href="{unsubscribe_url}">Unsubscribe from this digest</a>.
+                <a href="{unsubscribe_url}" style="color:{link_color};">Unsubscribe from this digest</a>.
               </p>
             </td>
           </tr>

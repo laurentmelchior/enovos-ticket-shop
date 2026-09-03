@@ -163,6 +163,10 @@ namespace {
         return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
 
+    function esc_attr(string $value): string {
+        return esc_html($value);
+    }
+
     function esc_html__(string $value, string $domain = ''): string {
         unset($domain);
         return esc_html($value);
@@ -564,9 +568,33 @@ HTML;
         'enabled' => 1,
         'new_products_hours' => 24,
         'new_products_limit' => 12,
+        'link_color' => '#005ca9',
         'templates' => [],
     ];
+    $GLOBALS['test_options']['woocommerce_email_base_color'] = '#7F54B3';
     $GLOBALS['test_options']['date_format'] = 'Y-m-d';
+    assert_same(
+        '#aabbcc',
+        invoke_private(EmailTemplateEditor::class, 'sanitize_link_color', '#abc'),
+        'A valid three-digit link color must be expanded for the HTML color input.'
+    );
+    assert_same(
+        '#abcdef',
+        invoke_private(EmailTemplateEditor::class, 'sanitize_link_color', '#ABCDEF'),
+        'A valid six-digit link color must be normalized.'
+    );
+    assert_same(
+        '#7f54b3',
+        invoke_private(EmailTemplateEditor::class, 'sanitize_link_color', 'red'),
+        'An invalid link color must fall back to the WooCommerce email base color.'
+    );
+    $GLOBALS['test_options']['woocommerce_email_base_color'] = 'invalid';
+    assert_same(
+        '#7f54b3',
+        invoke_private(EmailTemplateEditor::class, 'sanitize_link_color', '#12345'),
+        'An invalid WooCommerce base color must fall back to the plugin default.'
+    );
+    $GLOBALS['test_options']['woocommerce_email_base_color'] = '#7F54B3';
     $GLOBALS['test_products'] = [
         new \WC_Product(
             '<script>alert(1)</script>First product',
@@ -590,6 +618,11 @@ HTML;
         ),
     ];
     $email = new \WC_Email();
+    assert_same(
+        '#005ca9',
+        invoke_private(EmailTemplateEditor::class, 'format_template', '{link_color}', $email),
+        'The link-color placeholder must contain the configured color.'
+    );
     $product_template = '{new_products_count}|{#new_products}'
         . '{product_index}:{product_name}:{product_price}:{product_url}:{product_image_url}:'
         . '{product_sku}:{product_concert_date}:{product_description};{/new_products}'
@@ -614,6 +647,11 @@ HTML;
         str_contains($rendered_products, '<table role="presentation"')
         && str_contains($rendered_products, 'View product'),
         'The flat new-products token must render the ready-made HTML table.'
+    );
+    assert_true(
+        str_contains($rendered_products, 'style="color:#005ca9;text-decoration:none;"')
+        && str_contains($rendered_products, 'style="display:inline-block;color:#005ca9;text-decoration:none;"'),
+        'The ready-made product table must apply the configured color to both text links.'
     );
     assert_same(
         'woocommerce_gallery_thumbnail',

@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 0.7.10 – 2026-09-03
+- Added a configurable link color for the ready-made new-products email table and the `{link_color}` Beefree placeholder.
+
 ## Version 0.7.9 – 2026-09-03
 - Added a signed `{unsubscribe_url}` email placeholder and public confirmation form for safely disabling the existing `send_daily_digest` ACF user preference.
 
