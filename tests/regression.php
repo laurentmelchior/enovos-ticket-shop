@@ -904,6 +904,22 @@ HTML;
         'The delivery block must safely render the billing name and delivery field for email clients.'
     );
     assert_true(!str_contains($order_tokens, '<script>'), 'Order email tokens must not render executable ACF or name HTML.');
+    $placeholder_groups = invoke_private(EmailTemplateEditor::class, 'placeholder_groups');
+    assert_true(
+        isset(
+            $placeholder_groups['Order']['{admin_order_url}'],
+            $placeholder_groups['Order']['{delivery}'],
+            $placeholder_groups['Order']['{delivery_block}']
+        ),
+        'The Email Template settings reference must list all new order placeholders.'
+    );
+    $applicable_order_tokens = invoke_private(EmailTemplateEditor::class, 'applicable_placeholders', $order_email);
+    assert_true(
+        in_array('{admin_order_url}', $applicable_order_tokens, true)
+        && in_array('{delivery}', $applicable_order_tokens, true)
+        && in_array('{delivery_block}', $applicable_order_tokens, true),
+        'The Email Template settings must highlight all new placeholders for order emails.'
+    );
 
     $guest_email = new \WC_Email();
     $guest_email->id = 'customer_processing_order';
