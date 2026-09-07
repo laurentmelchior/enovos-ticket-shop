@@ -172,8 +172,8 @@ The **Email link color** field controls text links in the ready-made `{new_produ
 The settings page lists all supported placeholders and highlights those relevant to the selected email. Click a placeholder to copy it into Beefree. Common examples are:
 
 - Shop and customer: `{site_title}`, `{site_url}`, `{store_address}`, `{link_color}`, `{preheader}`, `{customer_name}`, `{customer_email}`
-- Orders: `{order_number}`, `{order_date}`, `{order_total}`, `{billing_address}`, `{view_order_url}`, `{order_items}`
-- Accounts: `{login_url}`, `{reset_password_url}`
+- Orders: `{order_number}`, `{order_date}`, `{order_total}`, `{billing_address}`, `{view_order_url}`, `{order_items}`. Order numbers and localized dates use non-breaking spaces.
+- Accounts: `{login_url}`, `{reset_password_url}`. The reset token contains the signed password setup or reset link in WooCommerce new-account and password-reset emails.
 - Approval: `{verification_url}`, `{customer_domain}`, `{approve_url}`, `{reject_url}`
 
 WooCommerce email variables use `{placeholder}` syntax, not WordPress `[shortcode]` syntax. Placeholders that do not apply to the selected email remain unchanged.
@@ -184,7 +184,7 @@ The editor can query recently published, catalog-visible WooCommerce products in
 
 The existing customer ACF field `send_daily_digest` (`field_6a450c952f711`) remains the subscription source. The Child Theme sender must select only users whose field value is enabled. The plugin does not subscribe customers automatically.
 
-Use `{new_products}` for a ready-made product table, `{new_products_count}` for the result count and `{new_products_date}` for the localized current date. To design each product in Beefree, place HTML between `{#new_products}` and `{/new_products}`. The editor repeats that block for every product and supports `{product_name}`, `{product_price}`, `{product_url}`, `{product_image}`, `{product_image_url}`, `{product_sku}`, `{product_description}`, `{product_concert_date}` and `{product_index}` inside it. `{product_description}` contains the complete WooCommerce product description; the ready-made `{new_products}` table omits it. Content between `{#no_new_products}` and `{/no_new_products}` is shown only when the query returns no products. Add `{unsubscribe_url}` to the digest email to provide a signed link valid for 30 days. The link opens a public confirmation form; viewing the link alone never changes the subscription.
+Use `{new_products}` for a ready-made product table, `{new_products_count}` for the result count and `{new_products_date}` for the localized current date. Date tokens use non-breaking spaces so the complete date stays on one line. To design each product in Beefree, place HTML between `{#new_products}` and `{/new_products}`. The editor repeats that block for every product and supports `{product_name}`, `{product_price}`, `{product_url}`, `{product_image}`, `{product_image_url}`, `{product_sku}`, `{product_description}`, `{product_concert_date}` and `{product_index}` inside it. `{product_description}` contains the complete WooCommerce product description; the ready-made `{new_products}` table omits it. Content between `{#no_new_products}` and `{/no_new_products}` is shown only when the query returns no products. Add `{unsubscribe_url}` to the digest email to provide a signed link valid for 30 days. The link opens a public confirmation form; viewing the link alone never changes the subscription.
 
 The following complete HTML document can be pasted into the editor and then restyled in Beefree:
 

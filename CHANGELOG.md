@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 0.7.13 – 2026-09-07
+- Kept localized date and order-number email placeholders together with non-breaking spaces.
+- Fixed `{reset_password_url}` in new-account and password-reset email templates.
+
 ## Version 0.7.12 – 2026-09-07
 - Added per-email subject overrides and preheader preview text to the Beefree email template settings.
 
