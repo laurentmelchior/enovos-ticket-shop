@@ -151,6 +151,10 @@ namespace {
         return strip_tags($value);
     }
 
+    function wp_specialchars_decode(string $value, int $quote_style = ENT_NOQUOTES): string {
+        return htmlspecialchars_decode($value, $quote_style);
+    }
+
     function absint(mixed $value): int {
         return abs((int) $value);
     }
@@ -618,6 +622,63 @@ HTML;
         ),
     ];
     $email = new \WC_Email();
+    $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['subjects']['test_email']
+        = 'Tickets for {site_title}: <strong>{customer_name}</strong>';
+    $email->object = new \WP_User(8, 'subject@example.test', 'Subject Customer');
+    assert_same(
+        'Tickets for Example Shop: Subject Customer',
+        EmailTemplateEditor::filter_subject('WooCommerce fallback', null, $email),
+        'The configured subject must replace placeholders and strip HTML.'
+    );
+    $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['subjects']['test_email'] = ' <strong></strong> ';
+    assert_same(
+        'WooCommerce fallback',
+        EmailTemplateEditor::filter_subject('WooCommerce fallback', null, $email),
+        'An empty formatted subject must retain the WooCommerce fallback.'
+    );
+    unset($GLOBALS['test_options']['enovos_ticket_shop_email_templates']['subjects']['test_email']);
+
+    $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['preheaders']['test_email']
+        = 'Preview for {site_title} & tickets';
+    $settings = invoke_private(EmailTemplateEditor::class, 'settings');
+    $content = invoke_private(
+        EmailTemplateEditor::class,
+        'apply_preheader',
+        '<!doctype html><html><body class="mail"><p>Body</p></body></html>',
+        $email,
+        $settings
+    );
+    assert_true(
+        str_contains($content, '<body class="mail"><div style="display:none;'),
+        'The preheader must be inserted immediately after the opening body tag.'
+    );
+    assert_true(
+        str_contains($content, 'Preview for Example Shop &amp; tickets'),
+        'The preheader must render placeholders and escape its text.'
+    );
+    $custom_preheader = invoke_private(EmailTemplateEditor::class, 'format_template', '{preheader}<p>Body</p>', $email);
+    $without_duplicate = invoke_private(
+        EmailTemplateEditor::class,
+        'apply_preheader',
+        $custom_preheader,
+        $email,
+        $settings,
+        true
+    );
+    assert_same(
+        1,
+        substr_count($without_duplicate, 'display:none;font-size:1px'),
+        'A custom {preheader} placeholder must not be duplicated automatically.'
+    );
+    unset($GLOBALS['test_options']['enovos_ticket_shop_email_templates']['preheaders']['test_email']);
+    $settings = invoke_private(EmailTemplateEditor::class, 'settings');
+    assert_same(
+        '<p>Body</p>',
+        invoke_private(EmailTemplateEditor::class, 'apply_preheader', '<p>Body</p>', $email, $settings),
+        'Content must remain unchanged when no preheader is configured.'
+    );
+    $email->object = null;
+
     assert_same(
         '#005ca9',
         invoke_private(EmailTemplateEditor::class, 'format_template', '{link_color}', $email),

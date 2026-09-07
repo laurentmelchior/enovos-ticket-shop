@@ -163,13 +163,15 @@ The login page shows **Did not receive the verification email?** as a simple lin
 
 Open **Enovos WooCommerce Addons > Settings > Email Templates** to optionally replace any registered WooCommerce email with a complete Beefree HTML export. Enable **Use custom HTML templates**, select an email, paste its HTML and save. The setting is off by default, and an empty field always falls back to the original WooCommerce or plugin template.
 
-Custom templates apply to emails configured as HTML. They are sent as the complete document without an additional WooCommerce header or footer. Existing email recipients, subjects and attachments are unchanged, including Enovos ticket PDF attachments.
+Custom templates apply to emails configured as HTML. They are sent as the complete document without an additional WooCommerce header or footer. Existing email recipients and attachments are unchanged, including Enovos ticket PDF attachments.
+
+The **Subject** and **Preheader text** fields are stored separately for each selected email and apply even when custom HTML templates are disabled. Leave **Subject** empty to retain the WooCommerce subject. The preheader is hidden in the message body and shown as preview text by supporting email clients; 40–90 characters are recommended. Both fields support the placeholders listed on the page. In custom HTML, add `{preheader}` immediately after the opening `<body>` tag to control its position; otherwise the plugin inserts it automatically.
 
 The **Email link color** field controls text links in the ready-made `{new_products}` table. Its default follows the WooCommerce email base color. Use `{link_color}` in Beefree HTML to apply the same color to custom links.
 
 The settings page lists all supported placeholders and highlights those relevant to the selected email. Click a placeholder to copy it into Beefree. Common examples are:
 
-- Shop and customer: `{site_title}`, `{site_url}`, `{store_address}`, `{link_color}`, `{customer_name}`, `{customer_email}`
+- Shop and customer: `{site_title}`, `{site_url}`, `{store_address}`, `{link_color}`, `{preheader}`, `{customer_name}`, `{customer_email}`
 - Orders: `{order_number}`, `{order_date}`, `{order_total}`, `{billing_address}`, `{view_order_url}`, `{order_items}`
 - Accounts: `{login_url}`, `{reset_password_url}`
 - Approval: `{verification_url}`, `{customer_domain}`, `{approve_url}`, `{reject_url}`

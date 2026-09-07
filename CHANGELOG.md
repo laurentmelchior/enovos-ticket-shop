@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 0.7.12 – 2026-09-07
+- Added per-email subject overrides and preheader preview text to the Beefree email template settings.
+
 ## Version 0.7.11 – 2026-09-03
 - Removed product descriptions from the ready-made `{new_products}` email table.
 
