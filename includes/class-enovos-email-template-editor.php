@@ -412,6 +412,7 @@ final class EmailTemplateEditor {
         if ($order instanceof \WC_Order) {
             $date = $order->get_date_created();
             $view_url = wc_get_endpoint_url('view-order', (string) $order->get_id(), wc_get_page_permalink('myaccount'));
+            $delivery = self::order_delivery($order);
             $values += [
                 '{order_number}' => self::no_wrap(esc_html($order->get_order_number())),
                 '{order_date}' => self::no_wrap(esc_html($date ? wc_format_datetime($date) : '')),
@@ -426,10 +427,38 @@ final class EmailTemplateEditor {
                 '{billing_phone}' => esc_html($order->get_billing_phone()),
                 '{shipping_address}' => wp_kses_post($order->get_formatted_shipping_address()),
                 '{view_order_url}' => esc_url($view_url),
+                '{admin_order_url}' => esc_url($order->get_edit_order_url()),
+                '{delivery}' => nl2br(esc_html($delivery)),
+                '{delivery_block}' => self::delivery_block($order, $delivery),
                 '{order_items}' => self::order_items_html($order),
             ];
         }
         return $values;
+    }
+
+    private static function order_delivery(\WC_Order $order): string {
+        if (!function_exists('get_field')) {
+            return '';
+        }
+        $user = $order->get_user();
+        if (!$user instanceof \WP_User) {
+            return '';
+        }
+        $delivery = get_field('delivery', 'user_' . $user->ID);
+        return is_scalar($delivery) ? trim((string) $delivery) : '';
+    }
+
+    private static function delivery_block(\WC_Order $order, string $delivery): string {
+        $name = trim($order->get_billing_first_name() . ' ' . $order->get_billing_last_name());
+        if ($name === '' && $delivery === '') {
+            return '';
+        }
+        $content = esc_html($name);
+        if ($delivery !== '') {
+            $content .= ($content !== '' ? '<br />' : '') . nl2br(esc_html($delivery));
+        }
+        return '<div class="delivery-name" style="font-size:22px;font-weight:bold;text-transform:uppercase;'
+            . 'line-height:0.9;margin-bottom:30px;">' . $content . '</div>';
     }
 
     /**
@@ -724,6 +753,9 @@ final class EmailTemplateEditor {
                 '{billing_phone}' => __('Billing phone number', 'enovos-ticket-shop'),
                 '{shipping_address}' => __('Formatted shipping address', 'enovos-ticket-shop'),
                 '{view_order_url}' => __('Customer order URL', 'enovos-ticket-shop'),
+                '{admin_order_url}' => __('Administrator / shop manager order edit URL', 'enovos-ticket-shop'),
+                '{delivery}' => __('Customer delivery ACF field', 'enovos-ticket-shop'),
+                '{delivery_block}' => __('Billing name and customer delivery field HTML block', 'enovos-ticket-shop'),
                 '{order_items}' => __('HTML order items table', 'enovos-ticket-shop'),
             ],
             __('Account', 'enovos-ticket-shop') => [
@@ -764,7 +796,8 @@ final class EmailTemplateEditor {
                 '{customer_name}', '{customer_email}', '{customer_first_name}', '{customer_last_name}',
                 '{order_number}', '{order_date}', '{order_total}', '{order_subtotal}', '{order_status}',
                 '{payment_method}', '{order_billing_full_name}', '{billing_first_name}', '{billing_last_name}',
-                '{billing_address}', '{billing_phone}', '{shipping_address}', '{view_order_url}', '{order_items}',
+                '{billing_address}', '{billing_phone}', '{shipping_address}', '{view_order_url}',
+                '{admin_order_url}', '{delivery}', '{delivery_block}', '{order_items}',
             ]);
         }
         if (

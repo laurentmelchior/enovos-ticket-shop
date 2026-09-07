@@ -146,7 +146,14 @@ The post-registration confirmation needs no shortcode; it is the WooCommerce not
 [enovos_registration_notice]
 ```
 
-Both `type="auto"` (default) and `type="status"` display the current Enovos account status when applicable. Administrators can temporarily use `debug="1"` to display the notice inputs without exposing them to customers. Exclude the My Account page from full-page caching so customer-specific state is preserved.
+The plugin registers two WordPress shortcodes:
+
+- `[enovos_registration_notice]`
+- `[enovos_account_status]` (alias with identical output)
+
+Both accept `type="auto"` (default) or `type="status"`, `class="woocommerce-message"` for the wrapper class, and `debug="1"` for temporary administrator-only diagnostics. They display the current Enovos account status when applicable. Exclude the My Account page from full-page caching so customer-specific state is preserved.
+
+WooCommerce Core shortcodes such as `[woocommerce_cart]`, `[woocommerce_checkout]`, `[woocommerce_my_account]`, `[woocommerce_order_tracking]`, `[products]`, `[product_page]`, `[product_category]`, `[product_categories]`, `[add_to_cart]`, `[add_to_cart_url]`, `[related_products]` and `[shop_messages]` are provided by WooCommerce, not this plugin.
 
 Enter one exact domain per line in the whitelist without `@`. A domain does not include its subdomains: for example, `company.com` does not match `shop.company.com`. Approval notification recipients are configurable; when left empty, the WordPress administration email is used.
 
@@ -169,12 +176,20 @@ The **Subject** and **Preheader text** fields are stored separately for each sel
 
 The **Email link color** field controls text links in the ready-made `{new_products}` table. Its default follows the WooCommerce email base color. Use `{link_color}` in Beefree HTML to apply the same color to custom links.
 
-The settings page lists all supported placeholders and highlights those relevant to the selected email. Click a placeholder to copy it into Beefree. Common examples are:
+The settings page lists every supported placeholder and highlights those relevant to the selected email. Click a placeholder to copy it into Beefree:
 
-- Shop and customer: `{site_title}`, `{site_url}`, `{store_address}`, `{link_color}`, `{preheader}`, `{customer_name}`, `{customer_email}`
-- Orders: `{order_number}`, `{order_date}`, `{order_total}`, `{billing_address}`, `{view_order_url}`, `{order_items}`. Order numbers and localized dates use non-breaking spaces.
-- Accounts: `{login_url}`, `{reset_password_url}`, `{password_reset_url}`. `{reset_password_url}` contains the signed link that WooCommerce new-account and password-reset emails provide. `{password_reset_url}` reuses that link when it exists and otherwise issues a fresh reset key for the recipient, so it also works in emails such as the approval notification. Templates without the token never issue a key.
+- Shop: `{site_title}`, `{site_address}`, `{site_url}`, `{store_address}`, `{store_email}`, `{shop_url}`, `{link_color}`, `{preheader}`
+- Customer: `{customer_name}`, `{customer_email}`, `{customer_first_name}`, `{customer_last_name}`
+- Orders: `{order_number}`, `{order_date}`, `{order_total}`, `{order_subtotal}`, `{order_status}`, `{payment_method}`, `{order_billing_full_name}`, `{billing_first_name}`, `{billing_last_name}`, `{billing_address}`, `{billing_phone}`, `{shipping_address}`, `{view_order_url}`, `{admin_order_url}`, `{delivery}`, `{delivery_block}`, `{order_items}`
+- Accounts: `{login_url}`, `{reset_password_url}`, `{password_reset_url}`, `{unsubscribe_url}`
 - Approval: `{verification_url}`, `{customer_domain}`, `{approve_url}`, `{reject_url}`
+- New products: `{new_products}`, `{new_products_count}`, `{new_products_date}`, `{#new_products}`, `{/new_products}`, `{#no_new_products}`, `{/no_new_products}`, `{product_name}`, `{product_price}`, `{product_url}`, `{product_image}`, `{product_image_url}`, `{product_sku}`, `{product_description}`, `{product_concert_date}`, `{product_index}`
+
+`{admin_order_url}` uses WooCommerce's order edit URL, so it works with both HPOS and legacy order storage. WordPress authentication and WooCommerce capabilities still protect the destination. For example: `<a href="{admin_order_url}">Order {order_number}</a>`.
+
+`{delivery}` reads the ACF `delivery` field from the order's registered customer. `{delivery_block}` renders the billing first and last name followed by that delivery value in an email-safe HTML block, matching the information used on packing slips. Guest orders have no user ACF field, so `{delivery}` is empty while `{delivery_block}` still shows the billing name.
+
+Order numbers and localized dates use non-breaking spaces. `{reset_password_url}` contains the signed link that WooCommerce new-account and password-reset emails provide. `{password_reset_url}` reuses that link when it exists and otherwise issues a fresh reset key for the recipient, so it also works in emails such as the approval notification. Templates without the token never issue a key.
 
 WooCommerce email variables use `{placeholder}` syntax, not WordPress `[shortcode]` syntax. Placeholders that do not apply to the selected email remain unchanged.
 
