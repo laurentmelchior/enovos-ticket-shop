@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 0.7.14 – 2026-09-07
+- Added the `{password_reset_url}` placeholder that issues a reset link even in emails without WooCommerce reset data, listed with all other placeholders on the settings page.
+
 ## Version 0.7.13 – 2026-09-07
 - Kept localized date and order-number email placeholders together with non-breaking spaces.
 - Fixed `{reset_password_url}` in new-account and password-reset email templates.
