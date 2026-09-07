@@ -15,6 +15,9 @@ final class EmailTemplateEditor {
         add_filter('woocommerce_email_headers', [self::class, 'capture_email_from_headers'], 999, 4);
         add_filter('woocommerce_email_styles', [self::class, 'capture_email'], 1, 2);
         add_filter('woocommerce_mail_content', [self::class, 'replace_mail_content'], 999);
+        foreach (array_keys(self::settings()['subjects']) as $email_id) {
+            add_filter('woocommerce_email_subject_' . $email_id, [self::class, 'filter_subject'], 999, 3);
+        }
     }
 
     /**
@@ -43,10 +46,29 @@ final class EmailTemplateEditor {
         }
         $settings = self::settings();
         $template = (string) ($settings['templates'][$email->id] ?? '');
-        if (empty($settings['enabled']) || trim($template) === '') {
-            return $content;
+        $has_preheader_placeholder = str_contains($template, '{preheader}');
+        if (!empty($settings['enabled']) && trim($template) !== '') {
+            $content = self::format_template($template, $email);
         }
-        return self::format_template($template, $email);
+        return self::apply_preheader($content, $email, $settings, $has_preheader_placeholder);
+    }
+
+    /**
+     * @param mixed $object
+     * @param mixed $email
+     */
+    public static function filter_subject(string $subject, $object, $email): string {
+        unset($object);
+        if (!$email instanceof \WC_Email || $email->id === '') {
+            return $subject;
+        }
+        $configured_subject = trim((string) (self::settings()['subjects'][$email->id] ?? ''));
+        if ($configured_subject === '') {
+            return $subject;
+        }
+        $formatted = self::format_template($configured_subject, $email);
+        $formatted = trim(wp_specialchars_decode(wp_strip_all_tags($formatted), ENT_QUOTES));
+        return $formatted !== '' ? $formatted : $subject;
     }
 
     public static function render_settings(): void {
@@ -57,6 +79,8 @@ final class EmailTemplateEditor {
         }
         $settings = self::settings();
         $template = (string) ($settings['templates'][$selected_id] ?? '');
+        $subject = (string) ($settings['subjects'][$selected_id] ?? '');
+        $preheader = (string) ($settings['preheaders'][$selected_id] ?? '');
         $selected_email = $emails[$selected_id] ?? null;
 
         echo '<div class="enovos-card"><div class="enovos-card__header"><h2>' . esc_html__('Beefree HTML templates', 'enovos-ticket-shop') . '</h2>';
@@ -95,6 +119,13 @@ final class EmailTemplateEditor {
         echo '<input type="color" id="enovos_link_color" name="link_color" value="' . esc_attr($settings['link_color']) . '"></p>';
         echo '<p class="description">' . esc_html__('Used by links in the ready-made new-products table and available as {link_color} in custom HTML.', 'enovos-ticket-shop') . '</p>';
         echo '</div>';
+        $default_subject = (string) $selected_email->get_option('subject', $selected_email->get_default_subject());
+        echo '<p><label for="enovos_email_subject"><strong>' . esc_html__('Subject', 'woocommerce') . '</strong></label><br>';
+        echo '<input type="text" id="enovos_email_subject" name="email_subject" class="large-text" value="' . esc_attr($subject) . '" placeholder="' . esc_attr($default_subject) . '"></p>';
+        echo '<p class="description">' . esc_html__('Leave empty to use the WooCommerce subject. The placeholders listed on this page are supported.', 'enovos-ticket-shop') . '</p>';
+        echo '<p><label for="enovos_email_preheader"><strong>' . esc_html__('Preheader text', 'enovos-ticket-shop') . '</strong></label><br>';
+        echo '<input type="text" id="enovos_email_preheader" name="email_preheader" class="large-text" value="' . esc_attr($preheader) . '"></p>';
+        echo '<p class="description">' . esc_html__('Preview text shown by email clients; 40–90 characters are recommended. Use {preheader} in custom HTML to control its position.', 'enovos-ticket-shop') . '</p>';
         echo '<p><label for="enovos_email_template"><strong>' . esc_html($selected_email->get_title()) . '</strong></label></p>';
         echo '<textarea id="enovos_email_template" name="email_template" class="large-text code enovos-email-template-code" spellcheck="false" placeholder="<!doctype html>">' . esc_textarea($template) . '</textarea>';
         echo '<p class="description">' . esc_html__('An empty field uses the original WooCommerce template. Custom HTML is sent as the complete email body without the WooCommerce header or footer.', 'enovos-ticket-shop') . '</p>';
@@ -120,6 +151,18 @@ final class EmailTemplateEditor {
         $settings['new_products_limit'] = max(1, min(50, absint($_POST['new_products_limit'] ?? 12)));
         $settings['link_color'] = self::sanitize_link_color(wp_unslash((string) ($_POST['link_color'] ?? '')));
         $settings['templates'][$email_id] = wp_unslash((string) ($_POST['email_template'] ?? ''));
+        $subject = sanitize_text_field(wp_unslash((string) ($_POST['email_subject'] ?? '')));
+        $preheader = sanitize_text_field(wp_unslash((string) ($_POST['email_preheader'] ?? '')));
+        if ($subject === '') {
+            unset($settings['subjects'][$email_id]);
+        } else {
+            $settings['subjects'][$email_id] = $subject;
+        }
+        if ($preheader === '') {
+            unset($settings['preheaders'][$email_id]);
+        } else {
+            $settings['preheaders'][$email_id] = $preheader;
+        }
         update_option(self::OPTION, $settings, false);
 
         wp_safe_redirect(add_query_arg([
@@ -139,7 +182,7 @@ final class EmailTemplateEditor {
     }
 
     /**
-     * @return array{enabled:int,new_products_hours:int,new_products_limit:int,link_color:string,templates:array<string,string>}
+     * @return array{enabled:int,new_products_hours:int,new_products_limit:int,link_color:string,templates:array<string,string>,subjects:array<string,string>,preheaders:array<string,string>}
      */
     private static function settings(): array {
         $stored = get_option(self::OPTION, []);
@@ -152,6 +195,8 @@ final class EmailTemplateEditor {
             'new_products_limit' => max(1, min(50, absint($stored['new_products_limit'] ?? 12))),
             'link_color' => self::sanitize_link_color((string) ($stored['link_color'] ?? '')),
             'templates' => is_array($stored['templates'] ?? null) ? $stored['templates'] : [],
+            'subjects' => is_array($stored['subjects'] ?? null) ? $stored['subjects'] : [],
+            'preheaders' => is_array($stored['preheaders'] ?? null) ? $stored['preheaders'] : [],
         ];
     }
 
@@ -186,15 +231,58 @@ final class EmailTemplateEditor {
         return $emails;
     }
 
-    private static function format_template(string $template, \WC_Email $email): string {
+    private static function format_template(
+        string $template,
+        \WC_Email $email,
+        bool $include_preheader = true
+    ): string {
         $uses_new_products = preg_match(
             '/\{(?:#|\/)?(?:new_products|no_new_products)(?:_count|_date)?\}|\{product_[a-z_]+\}/',
             $template
         ) === 1;
         $products = $uses_new_products ? self::new_products() : [];
         $formatted = self::expand_repeatable_blocks($template, $products);
-        $formatted = strtr($formatted, self::replacement_values($email, $products, $uses_new_products));
+        $formatted = strtr(
+            $formatted,
+            self::replacement_values($email, $products, $uses_new_products, $include_preheader)
+        );
         return $email->format_string($formatted);
+    }
+
+    /**
+     * @param array{preheaders:array<string,string>} $settings
+     */
+    private static function apply_preheader(
+        string $content,
+        \WC_Email $email,
+        array $settings,
+        bool $has_preheader_placeholder = false
+    ): string {
+        $preheader = trim((string) ($settings['preheaders'][$email->id] ?? ''));
+        if ($preheader === '' || $has_preheader_placeholder) {
+            return $content;
+        }
+        $html = self::preheader_html(self::format_template($preheader, $email, false));
+        if ($html === '') {
+            return $content;
+        }
+        if (preg_match('/<body\b[^>]*>/i', $content, $matches, PREG_OFFSET_CAPTURE) === 1) {
+            $body = $matches[0][0];
+            $offset = $matches[0][1] + strlen($body);
+            return substr($content, 0, $offset) . $html . substr($content, $offset);
+        }
+        return $html . $content;
+    }
+
+    private static function preheader_html(string $preheader): string {
+        $preheader = trim(wp_specialchars_decode(wp_strip_all_tags($preheader), ENT_QUOTES));
+        if ($preheader === '') {
+            return '';
+        }
+        return '<div style="display:none;font-size:1px;line-height:1px;max-height:0;max-width:0;opacity:0;'
+            . 'overflow:hidden;mso-hide:all;">' . esc_html($preheader)
+            . '&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;'
+            . '</div>';
     }
 
     /**
@@ -227,7 +315,8 @@ final class EmailTemplateEditor {
     private static function replacement_values(
         \WC_Email $email,
         array $new_products = [],
-        bool $include_new_products = false
+        bool $include_new_products = false,
+        bool $include_preheader = true
     ): array {
         $object = $email->object ?? null;
         $order = $object instanceof \WC_Order ? $object : null;
@@ -261,7 +350,9 @@ final class EmailTemplateEditor {
         $login_url = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('myaccount') : $site_url;
         $reset_url = (string) ($native['{set_password_url}'] ?? $native['{reset_password_url}'] ?? '');
         $email_user = self::email_user($email, $order, $user);
-        $link_color = self::settings()['link_color'];
+        $settings = self::settings();
+        $link_color = $settings['link_color'];
+        $preheader = trim((string) ($settings['preheaders'][$email->id] ?? ''));
         $values = [
             '{site_title}' => esc_html((string) get_bloginfo('name')),
             '{site_address}' => esc_url($site_url),
@@ -270,6 +361,9 @@ final class EmailTemplateEditor {
             '{store_email}' => sanitize_email((string) get_option('woocommerce_email_from_address', get_option('admin_email'))),
             '{shop_url}' => esc_url(is_string($shop_url) && $shop_url !== '' ? $shop_url : $site_url),
             '{link_color}' => esc_attr($link_color),
+            '{preheader}' => $include_preheader && $preheader !== ''
+                ? self::preheader_html(self::format_template($preheader, $email, false))
+                : '',
             '{customer_name}' => esc_html($customer_name),
             '{customer_email}' => sanitize_email($customer_email),
             '{customer_first_name}' => esc_html($first_name),
@@ -520,6 +614,7 @@ final class EmailTemplateEditor {
                 '{store_email}' => __('Store sender email', 'enovos-ticket-shop'),
                 '{shop_url}' => __('Shop page URL', 'enovos-ticket-shop'),
                 '{link_color}' => __('Configured email link color', 'enovos-ticket-shop'),
+                '{preheader}' => __('Configured hidden email preview text', 'enovos-ticket-shop'),
             ],
             __('New products', 'enovos-ticket-shop') => [
                 '{new_products}' => __('Complete HTML product table', 'enovos-ticket-shop'),
@@ -581,7 +676,7 @@ final class EmailTemplateEditor {
     private static function applicable_placeholders(\WC_Email $email): array {
         $tokens = [
             '{site_title}', '{site_address}', '{site_url}', '{store_address}', '{store_email}', '{shop_url}',
-            '{link_color}',
+            '{link_color}', '{preheader}',
             '{new_products}', '{new_products_count}', '{new_products_date}',
             '{#new_products}', '{/new_products}', '{#no_new_products}', '{/no_new_products}',
             '{product_name}', '{product_price}', '{product_url}', '{product_image}', '{product_image_url}',
