@@ -173,7 +173,7 @@ The settings page lists all supported placeholders and highlights those relevant
 
 - Shop and customer: `{site_title}`, `{site_url}`, `{store_address}`, `{link_color}`, `{preheader}`, `{customer_name}`, `{customer_email}`
 - Orders: `{order_number}`, `{order_date}`, `{order_total}`, `{billing_address}`, `{view_order_url}`, `{order_items}`. Order numbers and localized dates use non-breaking spaces.
-- Accounts: `{login_url}`, `{reset_password_url}`. The reset token contains the signed password setup or reset link in WooCommerce new-account and password-reset emails.
+- Accounts: `{login_url}`, `{reset_password_url}`, `{password_reset_url}`. `{reset_password_url}` contains the signed link that WooCommerce new-account and password-reset emails provide. `{password_reset_url}` reuses that link when it exists and otherwise issues a fresh reset key for the recipient, so it also works in emails such as the approval notification. Templates without the token never issue a key.
 - Approval: `{verification_url}`, `{customer_domain}`, `{approve_url}`, `{reject_url}`
 
 WooCommerce email variables use `{placeholder}` syntax, not WordPress `[shortcode]` syntax. Placeholders that do not apply to the selected email remain unchanged.

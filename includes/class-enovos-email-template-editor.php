@@ -244,7 +244,13 @@ final class EmailTemplateEditor {
         $formatted = self::expand_repeatable_blocks($template, $products);
         $formatted = strtr(
             $formatted,
-            self::replacement_values($email, $products, $uses_new_products, $include_preheader)
+            self::replacement_values(
+                $email,
+                $products,
+                $uses_new_products,
+                $include_preheader,
+                str_contains($template, '{password_reset_url}')
+            )
         );
         return $email->format_string($formatted);
     }
@@ -316,7 +322,8 @@ final class EmailTemplateEditor {
         \WC_Email $email,
         array $new_products = [],
         bool $include_new_products = false,
-        bool $include_preheader = true
+        bool $include_preheader = true,
+        bool $include_password_reset = false
     ): array {
         $object = $email->object ?? null;
         $order = $object instanceof \WC_Order ? $object : null;
@@ -370,6 +377,9 @@ final class EmailTemplateEditor {
             '{customer_last_name}' => esc_html($last_name),
             '{login_url}' => esc_url(is_string($login_url) && $login_url !== '' ? $login_url : $site_url),
             '{reset_password_url}' => esc_url($reset_url),
+            '{password_reset_url}' => $include_password_reset
+                ? esc_url(self::password_reset_url($reset_url, $email_user))
+                : '',
             '{unsubscribe_url}' => $email_user instanceof \WP_User
                 ? esc_url(DigestUnsubscribe::unsubscribe_url($email_user))
                 : '',
@@ -450,6 +460,32 @@ final class EmailTemplateEditor {
             'id' => $user_id,
             'login' => rawurlencode($user_login),
         ], wc_get_endpoint_url('lost-password', '', wc_get_page_permalink('myaccount')));
+    }
+
+    /**
+     * Reset link for emails that carry no WooCommerce reset data. A fresh key is
+     * issued for the recipient so the token never renders an unusable link.
+     */
+    private static function password_reset_url(string $reset_url, ?\WP_User $user): string {
+        if ($reset_url !== '') {
+            return $reset_url;
+        }
+
+        $lost_password_url = wc_get_endpoint_url('lost-password', '', wc_get_page_permalink('myaccount'));
+        if (!$user instanceof \WP_User) {
+            return $lost_password_url;
+        }
+
+        $key = get_password_reset_key($user);
+        if (is_wp_error($key)) {
+            return $lost_password_url;
+        }
+
+        return add_query_arg([
+            'key' => (string) $key,
+            'id' => $user->ID,
+            'login' => rawurlencode($user->user_login),
+        ], $lost_password_url);
     }
 
     private static function no_wrap(string $value): string {
@@ -692,7 +728,8 @@ final class EmailTemplateEditor {
             ],
             __('Account', 'enovos-ticket-shop') => [
                 '{login_url}' => __('My account URL', 'enovos-ticket-shop'),
-                '{reset_password_url}' => __('Password setup/reset URL when available', 'enovos-ticket-shop'),
+                '{reset_password_url}' => __('WooCommerce password setup/reset URL when the email provides one', 'enovos-ticket-shop'),
+                '{password_reset_url}' => __('Password reset URL that also works in emails without WooCommerce reset data', 'enovos-ticket-shop'),
                 '{unsubscribe_url}' => __('Signed daily digest unsubscribe URL', 'enovos-ticket-shop'),
             ],
             __('Enovos approval', 'enovos-ticket-shop') => [
@@ -739,13 +776,13 @@ final class EmailTemplateEditor {
         ) {
             $tokens = array_merge($tokens, [
                 '{customer_name}', '{customer_email}', '{customer_first_name}', '{customer_last_name}',
-                '{login_url}', '{reset_password_url}', '{unsubscribe_url}',
+                '{login_url}', '{reset_password_url}', '{password_reset_url}', '{unsubscribe_url}',
             ]);
         }
         $enovos_tokens = [
             'enovos_customer_verify' => ['{customer_name}', '{customer_email}', '{verification_url}'],
             'enovos_admin_customer_approval' => ['{customer_name}', '{customer_email}', '{customer_domain}', '{approve_url}', '{reject_url}'],
-            'enovos_customer_approved' => ['{customer_name}', '{customer_email}', '{login_url}'],
+            'enovos_customer_approved' => ['{customer_name}', '{customer_email}', '{login_url}', '{password_reset_url}'],
             'enovos_customer_rejected' => ['{customer_name}', '{customer_email}', '{shop_url}'],
         ];
         if (isset($enovos_tokens[$email->id])) {

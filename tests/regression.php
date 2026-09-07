@@ -44,7 +44,8 @@ namespace {
         public function __construct(
             public int $ID,
             public string $user_email,
-            public string $display_name = ''
+            public string $display_name = '',
+            public string $user_login = ''
         ) {
         }
     }
@@ -108,6 +109,7 @@ namespace {
     $GLOBALS['test_users'] = [];
     $GLOBALS['test_user_meta'] = [];
     $GLOBALS['test_acf_updates'] = [];
+    $GLOBALS['test_reset_keys'] = [];
 
     function is_wp_error(mixed $value): bool {
         return $value instanceof WP_Error;
@@ -271,6 +273,11 @@ namespace {
 
     function wc_get_page_permalink(string $page): string {
         return 'https://example.test/' . $page;
+    }
+
+    function get_password_reset_key(WP_User $user): string|WP_Error {
+        $GLOBALS['test_reset_keys'][] = $user->ID;
+        return $GLOBALS['test_reset_key'] ?? ('reset-key-' . $user->ID);
     }
 
     function wc_get_endpoint_url(string $endpoint, string $value, string $permalink): string {
@@ -673,6 +680,41 @@ HTML;
         invoke_private(EmailTemplateEditor::class, 'format_template', '{reset_password_url}', new \WC_Email()),
         'The reset-password token must stay empty when no signed URL data is available.'
     );
+
+    assert_same(
+        'https://example.test/myaccount/lost-password?key=reset-key&amp;id=42&amp;login=customer-name',
+        invoke_private(EmailTemplateEditor::class, 'format_template', '{password_reset_url}', $reset_email),
+        'The own reset token must reuse WooCommerce reset data instead of issuing a new key.'
+    );
+    assert_same([], $GLOBALS['test_reset_keys'], 'WooCommerce reset data must not trigger a new reset key.');
+
+    $approved_email = new \WC_Email();
+    $approved_email->id = 'enovos_customer_approved';
+    $approved_email->object = new \WP_User(9, 'approved@example.test', 'Approved Customer', 'approved-customer');
+    assert_same(
+        'https://example.test/myaccount/lost-password?key=reset-key-9&amp;id=9&amp;login=approved-customer',
+        invoke_private(EmailTemplateEditor::class, 'format_template', '{password_reset_url}', $approved_email),
+        'The own reset token must issue a reset key for emails without WooCommerce reset data.'
+    );
+    assert_same([9], $GLOBALS['test_reset_keys'], 'A reset key must be issued exactly once for the recipient.');
+
+    $GLOBALS['test_reset_keys'] = [];
+    invoke_private(EmailTemplateEditor::class, 'format_template', '{login_url}', $approved_email);
+    assert_same([], $GLOBALS['test_reset_keys'], 'Templates without the own reset token must not issue reset keys.');
+
+    $GLOBALS['test_reset_key'] = new \WP_Error('no_key', 'Key generation failed');
+    assert_same(
+        'https://example.test/myaccount/lost-password',
+        invoke_private(EmailTemplateEditor::class, 'format_template', '{password_reset_url}', $approved_email),
+        'A failed reset key must fall back to the lost-password page.'
+    );
+    unset($GLOBALS['test_reset_key']);
+    assert_same(
+        'https://example.test/myaccount/lost-password',
+        invoke_private(EmailTemplateEditor::class, 'format_template', '{password_reset_url}', new \WC_Email()),
+        'The own reset token must fall back to the lost-password page without a recipient.'
+    );
+    $GLOBALS['test_reset_keys'] = [];
 
     $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['subjects']['test_email']
         = 'Tickets for {site_title}: <strong>{customer_name}</strong>';
