@@ -26,6 +26,10 @@ namespace {
         public array $placeholders = [];
         public bool $customer_email = true;
         public string $recipient = '';
+        public string $set_password_url = '';
+        public string $reset_key = '';
+        public int $user_id = 0;
+        public string $user_login = '';
 
         public function format_string(string $value): string {
             return strtr($value, $this->placeholders);
@@ -267,6 +271,11 @@ namespace {
 
     function wc_get_page_permalink(string $page): string {
         return 'https://example.test/' . $page;
+    }
+
+    function wc_get_endpoint_url(string $endpoint, string $value, string $permalink): string {
+        $suffix = $value === '' ? $endpoint : $endpoint . '/' . $value;
+        return rtrim($permalink, '/') . '/' . $suffix;
     }
 
     function sanitize_email(string $value): string {
@@ -622,6 +631,49 @@ HTML;
         ),
     ];
     $email = new \WC_Email();
+    assert_same(
+        "7\u{00A0}September\u{00A0}2026",
+        invoke_private(EmailTemplateEditor::class, 'no_wrap', " 7  September\n2026 "),
+        'Non-breaking tokens must replace whitespace runs with non-breaking spaces.'
+    );
+    $GLOBALS['test_options']['date_format'] = 'F j, Y';
+    $localized_dates = invoke_private(
+        EmailTemplateEditor::class,
+        'format_template',
+        '{new_products_date}|{#new_products}{product_concert_date}{/new_products}',
+        $email
+    );
+    assert_true(
+        str_contains($localized_dates, "\u{00A0}") && !str_contains($localized_dates, ' '),
+        'Localized current and concert dates must use non-breaking spaces.'
+    );
+    $GLOBALS['test_options']['date_format'] = 'Y-m-d';
+
+    $reset_email = new \WC_Email();
+    $reset_email->id = 'customer_reset_password';
+    $reset_email->reset_key = 'reset-key';
+    $reset_email->user_id = 42;
+    $reset_email->user_login = 'customer-name';
+    assert_same(
+        'https://example.test/myaccount/lost-password?key=reset-key&amp;id=42&amp;login=customer-name',
+        invoke_private(EmailTemplateEditor::class, 'format_template', '{reset_password_url}', $reset_email),
+        'Reset-password emails must build the signed WooCommerce password-reset URL.'
+    );
+
+    $new_account_email = new \WC_Email();
+    $new_account_email->id = 'customer_new_account';
+    $new_account_email->set_password_url = 'https://example.test/myaccount/lost-password?action=newaccount&key=abc';
+    assert_same(
+        'https://example.test/myaccount/lost-password?action=newaccount&amp;key=abc',
+        invoke_private(EmailTemplateEditor::class, 'format_template', '{reset_password_url}', $new_account_email),
+        'New-account emails must expose WooCommerce set_password_url through the reset token.'
+    );
+    assert_same(
+        '',
+        invoke_private(EmailTemplateEditor::class, 'format_template', '{reset_password_url}', new \WC_Email()),
+        'The reset-password token must stay empty when no signed URL data is available.'
+    );
+
     $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['subjects']['test_email']
         = 'Tickets for {site_title}: <strong>{customer_name}</strong>';
     $email->object = new \WP_User(8, 'subject@example.test', 'Subject Customer');
