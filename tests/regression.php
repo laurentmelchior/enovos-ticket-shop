@@ -50,6 +50,91 @@ namespace {
         }
     }
 
+    class WC_Order {
+        public function __construct(
+            private WP_User|false $user = false,
+            private string $first_name = 'Test',
+            private string $last_name = 'Customer'
+        ) {
+        }
+
+        public function get_user(): WP_User|false {
+            return $this->user;
+        }
+
+        public function get_customer_id(): int {
+            return $this->user instanceof WP_User ? $this->user->ID : 0;
+        }
+
+        public function get_id(): int {
+            return 123;
+        }
+
+        public function get_order_number(): string {
+            return 'ORDER-123';
+        }
+
+        public function get_date_created(): null {
+            return null;
+        }
+
+        public function get_formatted_order_total(): string {
+            return '25 EUR';
+        }
+
+        public function get_subtotal(): float {
+            return 25.0;
+        }
+
+        public function get_currency(): string {
+            return 'EUR';
+        }
+
+        public function get_status(): string {
+            return 'processing';
+        }
+
+        public function get_payment_method_title(): string {
+            return 'Invoice';
+        }
+
+        public function get_formatted_billing_full_name(): string {
+            return trim($this->first_name . ' ' . $this->last_name);
+        }
+
+        public function get_billing_first_name(): string {
+            return $this->first_name;
+        }
+
+        public function get_billing_last_name(): string {
+            return $this->last_name;
+        }
+
+        public function get_billing_email(): string {
+            return $this->user instanceof WP_User ? $this->user->user_email : 'guest@example.test';
+        }
+
+        public function get_formatted_billing_address(): string {
+            return '';
+        }
+
+        public function get_billing_phone(): string {
+            return '';
+        }
+
+        public function get_formatted_shipping_address(): string {
+            return '';
+        }
+
+        public function get_edit_order_url(): string {
+            return 'https://example.test/wp-admin/admin.php?page=wc-orders&action=edit&id=123';
+        }
+
+        public function get_items(): array {
+            return [];
+        }
+    }
+
     class WC_Product {
         public function __construct(
             private string $name,
@@ -109,6 +194,7 @@ namespace {
     $GLOBALS['test_users'] = [];
     $GLOBALS['test_user_meta'] = [];
     $GLOBALS['test_acf_updates'] = [];
+    $GLOBALS['test_acf_fields'] = [];
     $GLOBALS['test_reset_keys'] = [];
 
     function is_wp_error(mixed $value): bool {
@@ -271,8 +357,20 @@ namespace {
         return true;
     }
 
+    function get_field(string $field_name, string $reference): mixed {
+        return $GLOBALS['test_acf_fields'][$reference][$field_name] ?? null;
+    }
+
     function wc_get_page_permalink(string $page): string {
         return 'https://example.test/' . $page;
+    }
+
+    function wc_price(float $price, array $args = []): string {
+        return (string) $price . ' ' . ($args['currency'] ?? '');
+    }
+
+    function wc_get_order_status_name(string $status): string {
+        return ucfirst($status);
     }
 
     function get_password_reset_key(WP_User $user): string|WP_Error {
@@ -777,6 +875,44 @@ HTML;
         '#005ca9',
         invoke_private(EmailTemplateEditor::class, 'format_template', '{link_color}', $email),
         'The link-color placeholder must contain the configured color.'
+    );
+    $order_user = new \WP_User(44, 'order@example.test', 'Order Customer');
+    $GLOBALS['test_acf_fields']['user_44']['delivery'] = "Gate <script>alert(1)</script>\nSecond floor";
+    $order_email = new \WC_Email();
+    $order_email->id = 'customer_processing_order';
+    $order_email->object = new \WC_Order($order_user, 'Ada <Admin>', 'Lovelace');
+    $order_tokens = invoke_private(
+        EmailTemplateEditor::class,
+        'format_template',
+        '{admin_order_url}|{delivery}|{delivery_block}',
+        $order_email
+    );
+    assert_true(
+        str_starts_with(
+            $order_tokens,
+            'https://example.test/wp-admin/admin.php?page=wc-orders&amp;action=edit&amp;id=123|'
+        ),
+        'The admin-order URL must use and safely escape the WooCommerce edit URL.'
+    );
+    assert_true(
+        str_contains($order_tokens, 'Gate &lt;script&gt;alert(1)&lt;/script&gt;<br />' . "\n" . 'Second floor'),
+        'The delivery token must escape ACF content and preserve line breaks.'
+    );
+    assert_true(
+        str_contains($order_tokens, 'ADA &lt;ADMIN&gt; LOVELACE') === false
+        && str_contains($order_tokens, 'Ada &lt;Admin&gt; Lovelace<br />Gate'),
+        'The delivery block must safely render the billing name and delivery field for email clients.'
+    );
+    assert_true(!str_contains($order_tokens, '<script>'), 'Order email tokens must not render executable ACF or name HTML.');
+
+    $guest_email = new \WC_Email();
+    $guest_email->id = 'customer_processing_order';
+    $guest_email->object = new \WC_Order(false, 'Guest', 'Customer');
+    assert_same(
+        '|<div class="delivery-name" style="font-size:22px;font-weight:bold;text-transform:uppercase;'
+        . 'line-height:0.9;margin-bottom:30px;">Guest Customer</div>',
+        invoke_private(EmailTemplateEditor::class, 'format_template', '{delivery}|{delivery_block}', $guest_email),
+        'Guest orders must leave delivery empty while retaining the billing name block.'
     );
     $product_template = '{new_products_count}|{#new_products}'
         . '{product_index}:{product_name}:{product_price}:{product_url}:{product_image_url}:'

@@ -1,5 +1,10 @@
 # Changelog
 
+## Version 0.7.15 – 2026-09-07
+- Added `{admin_order_url}` for HPOS-compatible administrator and shop-manager links from order emails.
+- Added `{delivery}` and `{delivery_block}` for including the customer's ACF delivery value and billing name in order emails.
+- Documented all plugin shortcodes and email placeholders.
+
 ## Version 0.7.14 – 2026-09-07
 - Added the `{password_reset_url}` placeholder that issues a reset link even in emails without WooCommerce reset data, listed with all other placeholders on the settings page.
 
