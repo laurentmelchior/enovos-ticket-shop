@@ -348,7 +348,7 @@ final class EmailTemplateEditor {
         $site_url = home_url('/');
         $shop_url = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('shop') : $site_url;
         $login_url = function_exists('wc_get_page_permalink') ? wc_get_page_permalink('myaccount') : $site_url;
-        $reset_url = (string) ($native['{set_password_url}'] ?? $native['{reset_password_url}'] ?? '');
+        $reset_url = self::reset_password_url($email, $native);
         $email_user = self::email_user($email, $order, $user);
         $settings = self::settings();
         $link_color = $settings['link_color'];
@@ -378,10 +378,10 @@ final class EmailTemplateEditor {
             $values += [
                 '{new_products}' => self::new_products_html($new_products),
                 '{new_products_count}' => esc_html((string) count($new_products)),
-                '{new_products_date}' => esc_html(date_i18n(
+                '{new_products_date}' => self::no_wrap(esc_html(date_i18n(
                     (string) get_option('date_format', 'F j, Y'),
                     current_time('timestamp')
-                )),
+                ))),
             ];
         }
         foreach (['{verification_url}', '{approve_url}', '{reject_url}'] as $url_token) {
@@ -403,8 +403,8 @@ final class EmailTemplateEditor {
             $date = $order->get_date_created();
             $view_url = wc_get_endpoint_url('view-order', (string) $order->get_id(), wc_get_page_permalink('myaccount'));
             $values += [
-                '{order_number}' => esc_html($order->get_order_number()),
-                '{order_date}' => esc_html($date ? wc_format_datetime($date) : ''),
+                '{order_number}' => self::no_wrap(esc_html($order->get_order_number())),
+                '{order_date}' => self::no_wrap(esc_html($date ? wc_format_datetime($date) : '')),
                 '{order_total}' => wp_kses_post($order->get_formatted_order_total()),
                 '{order_subtotal}' => wp_kses_post(wc_price((float) $order->get_subtotal(), ['currency' => $order->get_currency()])),
                 '{order_status}' => esc_html(wc_get_order_status_name($order->get_status())),
@@ -420,6 +420,40 @@ final class EmailTemplateEditor {
             ];
         }
         return $values;
+    }
+
+    /**
+     * @param array<string,mixed> $native
+     */
+    private static function reset_password_url(\WC_Email $email, array $native): string {
+        foreach (['{set_password_url}', '{reset_password_url}', '{reset_url}'] as $token) {
+            $url = trim((string) ($native[$token] ?? ''));
+            if ($url !== '') {
+                return $url;
+            }
+        }
+
+        $set_password_url = trim((string) ($email->set_password_url ?? ''));
+        if ($set_password_url !== '') {
+            return $set_password_url;
+        }
+
+        $reset_key = trim((string) ($email->reset_key ?? ''));
+        $user_id = absint($email->user_id ?? 0);
+        $user_login = trim((string) ($email->user_login ?? ''));
+        if ($reset_key === '' || $user_id === 0 || $user_login === '') {
+            return '';
+        }
+
+        return add_query_arg([
+            'key' => $reset_key,
+            'id' => $user_id,
+            'login' => rawurlencode($user_login),
+        ], wc_get_endpoint_url('lost-password', '', wc_get_page_permalink('myaccount')));
+    }
+
+    private static function no_wrap(string $value): string {
+        return (string) preg_replace('/[ \t\r\n\f\v]+/', "\u{00A0}", trim($value));
     }
 
     private static function email_user(
@@ -541,7 +575,7 @@ final class EmailTemplateEditor {
             $timestamp = $date->getTimestamp();
         }
 
-        return esc_html(date_i18n((string) get_option('date_format', 'F j, Y'), $timestamp));
+        return self::no_wrap(esc_html(date_i18n((string) get_option('date_format', 'F j, Y'), $timestamp)));
     }
 
     private static function order_items_html(\WC_Order $order): string {
