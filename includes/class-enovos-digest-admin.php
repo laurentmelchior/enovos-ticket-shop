@@ -7,6 +7,8 @@ if (!defined('ABSPATH')) {
 
 final class DigestAdmin {
     public const COLUMN = 'enovos_daily_digest';
+    public const DELIVERY_COLUMN = 'enovos_delivery';
+    public const DELIVERY_FIELD = 'delivery';
     public const FILTER = 'enovos_daily_digest';
     public const FILTER_SUBSCRIBED = 'subscribed';
     public const FILTER_UNSUBSCRIBED = 'unsubscribed';
@@ -25,6 +27,7 @@ final class DigestAdmin {
      */
     public static function add_column(array $columns): array {
         $columns[self::COLUMN] = __('Daily Digest', 'enovos-ticket-shop');
+        $columns[self::DELIVERY_COLUMN] = __('Delivery', 'enovos-ticket-shop');
         return $columns;
     }
 
@@ -38,6 +41,10 @@ final class DigestAdmin {
     }
 
     public static function render_column(string $output, string $column_name, int $user_id): string {
+        if ($column_name === self::DELIVERY_COLUMN) {
+            $delivery = self::delivery($user_id);
+            return $delivery === '' ? '&mdash;' : nl2br(esc_html($delivery));
+        }
         if ($column_name !== self::COLUMN) {
             return $output;
         }
@@ -49,6 +56,16 @@ final class DigestAdmin {
 
     public static function is_subscribed(int $user_id): bool {
         return (string) get_user_meta($user_id, DigestUnsubscribe::FIELD_NAME, true) === '1';
+    }
+
+    public static function delivery(int $user_id): string {
+        $delivery = function_exists('get_field')
+            ? get_field(self::DELIVERY_FIELD, 'user_' . $user_id)
+            : get_user_meta($user_id, self::DELIVERY_FIELD, true);
+        if (!is_scalar($delivery)) {
+            $delivery = get_user_meta($user_id, self::DELIVERY_FIELD, true);
+        }
+        return is_scalar($delivery) ? trim((string) $delivery) : '';
     }
 
     public static function requested_filter(): string {
@@ -72,6 +89,9 @@ final class DigestAdmin {
         echo '<option value="' . esc_attr(self::FILTER_UNSUBSCRIBED) . '"' . selected($current, self::FILTER_UNSUBSCRIBED, false) . '>';
         echo esc_html__('Not subscribed', 'enovos-ticket-shop') . '</option>';
         echo '</select>';
+        // The users list has no generic filter button, so the control needs its own submit.
+        // The name must differ from "changeit" so users.php does not run a role change.
+        submit_button(__('Filter', 'enovos-ticket-shop'), '', self::FILTER . '_action', false);
     }
 
     public static function filter_users(\WP_User_Query $query): void {
