@@ -263,6 +263,13 @@ namespace {
         return in_array($capability, $GLOBALS['test_caps'] ?? [], true);
     }
 
+    function submit_button(string $text, string $type = 'primary', string $name = 'submit', bool $wrap = true): string {
+        $markup = '<input type="submit" name="' . esc_attr($name) . '" class="button" value="' . esc_attr($text) . '" />';
+        $markup = $wrap ? '<p class="submit">' . $markup . '</p>' : $markup;
+        echo $markup;
+        return $markup;
+    }
+
     function selected(mixed $selected, mixed $current = true, bool $display = true): string {
         $result = (string) $selected === (string) $current ? ' selected="selected"' : '';
         if ($display) {
@@ -1154,6 +1161,32 @@ HTML;
         'Other user columns must keep their original output.'
     );
 
+    assert_true(
+        isset($columns[DigestAdmin::DELIVERY_COLUMN]),
+        'The users table must register a Delivery column.'
+    );
+    assert_true(
+        !isset(DigestAdmin::add_sortable_column([])[DigestAdmin::DELIVERY_COLUMN]),
+        'The Delivery column must not be sortable.'
+    );
+    $GLOBALS['test_acf_fields']['user_21']['delivery'] = "Gate <script>alert(1)</script>\nSecond floor";
+    assert_same(
+        "Gate &lt;script&gt;alert(1)&lt;/script&gt;<br />\nSecond floor",
+        DigestAdmin::render_column('', DigestAdmin::DELIVERY_COLUMN, 21),
+        'The Delivery column must escape the stored value and keep line breaks.'
+    );
+    assert_same(
+        '&mdash;',
+        DigestAdmin::render_column('', DigestAdmin::DELIVERY_COLUMN, 22),
+        'An empty delivery field must render a placeholder.'
+    );
+    $GLOBALS['test_user_meta'][24]['delivery'] = 'Backstage entrance';
+    assert_same(
+        'Backstage entrance',
+        DigestAdmin::render_column('', DigestAdmin::DELIVERY_COLUMN, 24),
+        'The Delivery column must fall back to user meta when ACF holds no value.'
+    );
+
     $_GET[DigestAdmin::FILTER] = 'subscribed';
     assert_same(DigestAdmin::FILTER_SUBSCRIBED, DigestAdmin::requested_filter(), 'The subscribed filter value must be accepted.');
     $_GET[DigestAdmin::FILTER] = 'unsubscribed';
@@ -1234,6 +1267,14 @@ HTML;
     assert_true(
         str_contains($filter_markup, 'selected="selected"'),
         'The current digest filter must be marked selected.'
+    );
+    assert_true(
+        str_contains($filter_markup, 'type="submit"'),
+        'The digest filter must provide its own submit button because the users list has none.'
+    );
+    assert_true(
+        !str_contains($filter_markup, 'changeit'),
+        'The digest filter button must not reuse the core role-change button name.'
     );
     ob_start();
     DigestAdmin::render_filter('bottom');
