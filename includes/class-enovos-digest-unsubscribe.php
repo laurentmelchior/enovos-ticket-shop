@@ -7,7 +7,7 @@ if (!defined('ABSPATH')) {
 
 final class DigestUnsubscribe {
     private const ACF_FIELD_KEY = 'field_6a450c952f711';
-    private const FIELD_NAME = 'send_daily_digest';
+    public const FIELD_NAME = 'send_daily_digest';
     private const LINK_LIFETIME = 30 * DAY_IN_SECONDS;
     private const QUERY_VAR = 'enovos_digest_unsubscribe';
     private const FORM_ACTION = 'enovos_digest_unsubscribe';

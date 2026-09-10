@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 0.7.16 – 2026-09-10
+- Added a sortable Daily Digest column and Subscribed / Not subscribed filter to the WordPress users list, using the existing `send_daily_digest` customer field.
+
 ## Version 0.7.15 – 2026-09-07
 - Added `{admin_order_url}` for HPOS-compatible administrator and shop-manager links from order emails.
 - Added `{delivery}` and `{delivery_block}` for including the customer's ACF delivery value and billing name in order emails.

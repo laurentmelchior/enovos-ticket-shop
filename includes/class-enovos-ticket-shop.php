@@ -80,6 +80,7 @@ final class Plugin {
         CustomerApproval::init();
         CustomerApprovalAdmin::init();
         DigestUnsubscribe::init();
+        DigestAdmin::init();
         EmailTemplateEditor::init();
         if (self::enabled('enable_order_ticket_box')) {
             OrderTickets::init();

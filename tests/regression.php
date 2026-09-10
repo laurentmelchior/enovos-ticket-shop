@@ -255,6 +255,39 @@ namespace {
         return $GLOBALS['test_options'][$name] ?? $default;
     }
 
+    function is_admin(): bool {
+        return !empty($GLOBALS['test_is_admin']);
+    }
+
+    function current_user_can(string $capability): bool {
+        return in_array($capability, $GLOBALS['test_caps'] ?? [], true);
+    }
+
+    function selected(mixed $selected, mixed $current = true, bool $display = true): string {
+        $result = (string) $selected === (string) $current ? ' selected="selected"' : '';
+        if ($display) {
+            echo $result;
+        }
+        return $result;
+    }
+
+    class WP_User_Query {
+        public function __construct(private array $query_vars = []) {
+        }
+
+        public function get(string $key): mixed {
+            return $this->query_vars[$key] ?? '';
+        }
+
+        public function set(string $key, mixed $value): void {
+            $this->query_vars[$key] = $value;
+        }
+
+        public function query_vars(): array {
+            return $this->query_vars;
+        }
+    }
+
     function esc_html(string $value): string {
         return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
     }
@@ -449,6 +482,7 @@ namespace Enovos\TicketShop {
 
     require_once dirname(__DIR__) . '/includes/class-enovos-ticket-ai.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-digest-unsubscribe.php';
+    require_once dirname(__DIR__) . '/includes/class-enovos-digest-admin.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-new-products.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-email-template-editor.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-ticket-shop.php';
@@ -1086,6 +1120,127 @@ HTML;
         invoke_private(EmailTemplateEditor::class, 'format_template', '{unsubscribe_url}', $digest_email),
         'The unsubscribe placeholder must remain empty when the recipient is ambiguous.'
     );
+
+    $columns = DigestAdmin::add_column(['username' => 'Username']);
+    assert_true(
+        isset($columns[DigestAdmin::COLUMN]),
+        'The users table must register a Daily Digest column.'
+    );
+    assert_same(
+        DigestAdmin::COLUMN,
+        DigestAdmin::add_sortable_column([])[DigestAdmin::COLUMN],
+        'The Daily Digest column must be sortable.'
+    );
+    $GLOBALS['test_user_meta'][21]['send_daily_digest'] = '1';
+    $GLOBALS['test_user_meta'][22]['send_daily_digest'] = '0';
+    assert_same(
+        'Subscribed',
+        DigestAdmin::render_column('', DigestAdmin::COLUMN, 21),
+        'A stored value of 1 must display as subscribed.'
+    );
+    assert_same(
+        'Not subscribed',
+        DigestAdmin::render_column('', DigestAdmin::COLUMN, 22),
+        'A stored value of 0 must display as not subscribed.'
+    );
+    assert_same(
+        'Not subscribed',
+        DigestAdmin::render_column('', DigestAdmin::COLUMN, 23),
+        'Missing digest meta must display as not subscribed.'
+    );
+    assert_same(
+        'unchanged',
+        DigestAdmin::render_column('unchanged', 'enovos_approval_status', 21),
+        'Other user columns must keep their original output.'
+    );
+
+    $_GET[DigestAdmin::FILTER] = 'subscribed';
+    assert_same(DigestAdmin::FILTER_SUBSCRIBED, DigestAdmin::requested_filter(), 'The subscribed filter value must be accepted.');
+    $_GET[DigestAdmin::FILTER] = 'unsubscribed';
+    assert_same(DigestAdmin::FILTER_UNSUBSCRIBED, DigestAdmin::requested_filter(), 'The unsubscribed filter value must be accepted.');
+    $_GET[DigestAdmin::FILTER] = 'drop-table';
+    assert_same('', DigestAdmin::requested_filter(), 'Unknown digest filter values must be ignored.');
+    unset($_GET[DigestAdmin::FILTER]);
+
+    $subscribed_query = DigestAdmin::query_modifications([], 'registered', 'DESC', DigestAdmin::FILTER_SUBSCRIBED);
+    assert_same(
+        [['key' => DigestUnsubscribe::FIELD_NAME, 'value' => '1', 'compare' => '=']],
+        $subscribed_query['meta_query'],
+        'The subscribed filter must require send_daily_digest=1.'
+    );
+    $unsubscribed_query = DigestAdmin::query_modifications([], 'registered', 'DESC', DigestAdmin::FILTER_UNSUBSCRIBED);
+    assert_same(
+        'OR',
+        $unsubscribed_query['meta_query'][0]['relation'],
+        'The unsubscribed filter must combine missing and non-subscribed meta values.'
+    );
+    assert_same(
+        ['key' => DigestUnsubscribe::FIELD_NAME, 'value' => '1', 'compare' => '!='],
+        $unsubscribed_query['meta_query'][0][0],
+        'The unsubscribed filter must include users whose digest meta is not 1.'
+    );
+    assert_same(
+        ['key' => DigestUnsubscribe::FIELD_NAME, 'compare' => 'NOT EXISTS'],
+        $unsubscribed_query['meta_query'][0][1],
+        'The unsubscribed filter must include users without digest meta.'
+    );
+
+    $sorted_query = DigestAdmin::query_modifications([], DigestAdmin::COLUMN, 'desc', '');
+    assert_same(
+        'OR',
+        $sorted_query['meta_query'][0]['relation'],
+        'Sorting must keep users with and without digest meta in the result set.'
+    );
+    assert_same(
+        ['key' => DigestUnsubscribe::FIELD_NAME, 'compare' => 'EXISTS'],
+        $sorted_query['meta_query'][0]['enovos_digest_sort'],
+        'Sorting must join existing digest meta without requiring a value.'
+    );
+    assert_same(
+        ['key' => DigestUnsubscribe::FIELD_NAME, 'compare' => 'NOT EXISTS'],
+        $sorted_query['meta_query'][0]['enovos_digest_missing'],
+        'Sorting must keep users who have never stored a digest preference.'
+    );
+    assert_same(
+        ['enovos_digest_sort' => 'DESC', 'display_name' => 'ASC'],
+        $sorted_query['orderby'],
+        'Digest sorting must use the joined meta value and a stable name fallback.'
+    );
+    assert_same(
+        [],
+        DigestAdmin::query_modifications([], 'registered', 'DESC', ''),
+        'The users query must stay unchanged without a digest filter or sort.'
+    );
+
+    $GLOBALS['test_is_admin'] = true;
+    $GLOBALS['test_caps'] = ['list_users'];
+    $GLOBALS['pagenow'] = 'users.php';
+    $_GET[DigestAdmin::FILTER] = DigestAdmin::FILTER_SUBSCRIBED;
+    $user_query = new \WP_User_Query(['orderby' => 'registered']);
+    DigestAdmin::filter_users($user_query);
+    assert_same(
+        [['key' => DigestUnsubscribe::FIELD_NAME, 'value' => '1', 'compare' => '=']],
+        $user_query->get('meta_query'),
+        'The users list query must apply the requested digest filter.'
+    );
+    $_GET[DigestAdmin::FILTER] = DigestAdmin::FILTER_SUBSCRIBED;
+    ob_start();
+    DigestAdmin::render_filter('top');
+    $filter_markup = (string) ob_get_clean();
+    assert_true(
+        str_contains($filter_markup, 'name="' . DigestAdmin::FILTER . '"'),
+        'The users list must render a Daily Digest filter control.'
+    );
+    assert_true(
+        str_contains($filter_markup, 'selected="selected"'),
+        'The current digest filter must be marked selected.'
+    );
+    ob_start();
+    DigestAdmin::render_filter('bottom');
+    assert_same('', (string) ob_get_clean(), 'The digest filter must render only once at the top of the users list.');
+    unset($_GET[DigestAdmin::FILTER], $GLOBALS['pagenow']);
+    $GLOBALS['test_is_admin'] = false;
+    $GLOBALS['test_caps'] = [];
 
     echo "All regression tests passed.\n";
 }
