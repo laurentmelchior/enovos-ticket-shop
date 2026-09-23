@@ -172,6 +172,13 @@ Open **Enovos WooCommerce Addons > Settings > Email Templates** to optionally re
 
 Custom templates apply to emails configured as HTML. They are sent as the complete document without an additional WooCommerce header or footer. Existing email recipients and attachments are unchanged, including Enovos ticket PDF attachments.
 
+A second Completed order entry, **Completed order – Esch-sur-Alzette (gadgets & others)** (`customer_completed_order_esch_gadgets`), is available in the same selector. WooCommerce still sends the standard `customer_completed_order` email; the plugin swaps in this HTML, subject and preheader only when both conditions hold:
+
+- the customer's `delivery` field equals or contains `Esch-sur-Alzette` (case-insensitive)
+- every product line item belongs to the WooCommerce category slug `gadgets` or `others`
+
+If the variant template is empty, or either condition fails, the existing Completed order template is used unchanged. Mixed carts that also include other categories (for example `den-atelier` tickets) keep the standard email.
+
 The **Subject** and **Preheader text** fields are stored separately for each selected email and apply even when custom HTML templates are disabled. Leave **Subject** empty to retain the WooCommerce subject. The preheader is hidden in the message body and shown as preview text by supporting email clients; 40–90 characters are recommended. Both fields support the placeholders listed on the page. In custom HTML, add `{preheader}` immediately after the opening `<body>` tag to control its position; otherwise the plugin inserts it automatically.
 
 The **Email link color** field controls text links in the ready-made `{new_products}` table. Its default follows the WooCommerce email base color. Use `{link_color}` in Beefree HTML to apply the same color to custom links.

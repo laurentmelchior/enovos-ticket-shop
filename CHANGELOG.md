@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 0.7.18 – 2026-09-23
+- Added a dedicated Completed order Beefree template for Esch-sur-Alzette delivery of gadgets and others products; all other completed purchases keep the existing Completed order email.
+
 ## Version 0.7.17 – 2026-09-10
 - Added the filter submit button the users list does not provide, so the Daily Digest selection can be applied.
 - Added a read-only Delivery column to the users list, showing the existing `delivery` customer field.
