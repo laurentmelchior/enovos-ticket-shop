@@ -54,7 +54,8 @@ namespace {
         public function __construct(
             private WP_User|false $user = false,
             private string $first_name = 'Test',
-            private string $last_name = 'Customer'
+            private string $last_name = 'Customer',
+            private array $items = []
         ) {
         }
 
@@ -131,7 +132,29 @@ namespace {
         }
 
         public function get_items(): array {
-            return [];
+            return $this->items;
+        }
+
+        public function get_formatted_line_subtotal(mixed $item): string {
+            unset($item);
+            return '10 EUR';
+        }
+    }
+
+    class WC_Order_Item_Product {
+        public function __construct(private int $product_id, private string $name = 'Product') {
+        }
+
+        public function get_product_id(): int {
+            return $this->product_id;
+        }
+
+        public function get_name(): string {
+            return $this->name;
+        }
+
+        public function get_quantity(): int {
+            return 1;
         }
     }
 
@@ -196,6 +219,7 @@ namespace {
     $GLOBALS['test_acf_updates'] = [];
     $GLOBALS['test_acf_fields'] = [];
     $GLOBALS['test_reset_keys'] = [];
+    $GLOBALS['test_product_categories'] = [];
 
     function is_wp_error(mixed $value): bool {
         return $value instanceof WP_Error;
@@ -399,6 +423,15 @@ namespace {
 
     function get_field(string $field_name, string $reference): mixed {
         return $GLOBALS['test_acf_fields'][$reference][$field_name] ?? null;
+    }
+
+    function wp_get_post_terms(int $post_id, string $taxonomy, array $args = []): array|WP_Error {
+        unset($taxonomy);
+        $slugs = $GLOBALS['test_product_categories'][$post_id] ?? [];
+        if (($args['fields'] ?? '') === 'slugs') {
+            return $slugs;
+        }
+        return $slugs;
     }
 
     function wc_get_page_permalink(string $page): string {
@@ -955,6 +988,97 @@ HTML;
         invoke_private(EmailTemplateEditor::class, 'format_template', '{delivery}|{delivery_block}', $guest_email),
         'Guest orders must leave delivery empty while retaining the billing name block.'
     );
+
+    $esch_user = new \WP_User(55, 'esch@example.test', 'Esch Customer');
+    $GLOBALS['test_acf_fields']['user_55']['delivery'] = "Esch-sur-Alzette\nLocker 3";
+    $GLOBALS['test_product_categories'][501] = ['gadgets'];
+    $GLOBALS['test_product_categories'][502] = ['others'];
+    $GLOBALS['test_product_categories'][503] = ['den-atelier'];
+    $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['templates']['customer_completed_order']
+        = '<p>STANDARD</p>';
+    $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['templates'][EmailTemplateEditor::ESCH_GADGETS_COMPLETED_ORDER_ID]
+        = '<p>ESCH-GADGETS</p>';
+    $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['subjects'][EmailTemplateEditor::ESCH_GADGETS_COMPLETED_ORDER_ID]
+        = 'Esch pickup for {customer_first_name}';
+    $esch_gadgets_email = new \WC_Email();
+    $esch_gadgets_email->id = 'customer_completed_order';
+    $esch_gadgets_email->object = new \WC_Order(
+        $esch_user,
+        'Esch',
+        'Buyer',
+        [new \WC_Order_Item_Product(501), new \WC_Order_Item_Product(502)]
+    );
+    assert_true(
+        invoke_private(EmailTemplateEditor::class, 'order_matches_esch_gadgets', $esch_gadgets_email->object),
+        'Esch-sur-Alzette delivery with only gadgets/others products must match the variant.'
+    );
+    assert_same(
+        EmailTemplateEditor::ESCH_GADGETS_COMPLETED_ORDER_ID,
+        invoke_private(EmailTemplateEditor::class, 'content_template_id', $esch_gadgets_email),
+        'Matching completed orders must resolve to the Esch gadgets template id.'
+    );
+    assert_same(
+        'Esch pickup for Esch',
+        EmailTemplateEditor::filter_subject('Completed order fallback', null, $esch_gadgets_email),
+        'Matching completed orders must use the Esch gadgets subject override.'
+    );
+
+    $ticket_email = new \WC_Email();
+    $ticket_email->id = 'customer_completed_order';
+    $ticket_email->object = new \WC_Order(
+        $esch_user,
+        'Esch',
+        'Buyer',
+        [new \WC_Order_Item_Product(503)]
+    );
+    assert_true(
+        !invoke_private(EmailTemplateEditor::class, 'order_matches_esch_gadgets', $ticket_email->object),
+        'Esch delivery with den-atelier products must keep the standard completed-order email.'
+    );
+    assert_same(
+        'customer_completed_order',
+        invoke_private(EmailTemplateEditor::class, 'content_template_id', $ticket_email),
+        'Non-matching completed orders must keep the standard template id.'
+    );
+
+    $mixed_email = new \WC_Email();
+    $mixed_email->id = 'customer_completed_order';
+    $mixed_email->object = new \WC_Order(
+        $esch_user,
+        'Esch',
+        'Buyer',
+        [new \WC_Order_Item_Product(501), new \WC_Order_Item_Product(503)]
+    );
+    assert_true(
+        !invoke_private(EmailTemplateEditor::class, 'order_matches_esch_gadgets', $mixed_email->object),
+        'Mixed gadget and ticket orders must keep the standard completed-order email.'
+    );
+
+    $luxembourg_user = new \WP_User(56, 'lux@example.test', 'Lux Customer');
+    $GLOBALS['test_acf_fields']['user_56']['delivery'] = 'Luxembourg';
+    $other_city_email = new \WC_Email();
+    $other_city_email->id = 'customer_completed_order';
+    $other_city_email->object = new \WC_Order(
+        $luxembourg_user,
+        'Lux',
+        'Buyer',
+        [new \WC_Order_Item_Product(501)]
+    );
+    assert_true(
+        !invoke_private(EmailTemplateEditor::class, 'order_matches_esch_gadgets', $other_city_email->object),
+        'Gadgets orders for other delivery cities must keep the standard completed-order email.'
+    );
+    assert_same(
+        'Completed order fallback',
+        EmailTemplateEditor::filter_subject('Completed order fallback', null, $other_city_email),
+        'Non-matching completed orders must keep the WooCommerce subject when no standard override exists.'
+    );
+    unset(
+        $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['templates']['customer_completed_order'],
+        $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['templates'][EmailTemplateEditor::ESCH_GADGETS_COMPLETED_ORDER_ID],
+        $GLOBALS['test_options']['enovos_ticket_shop_email_templates']['subjects'][EmailTemplateEditor::ESCH_GADGETS_COMPLETED_ORDER_ID]
+    );
+
     $product_template = '{new_products_count}|{#new_products}'
         . '{product_index}:{product_name}:{product_price}:{product_url}:{product_image_url}:'
         . '{product_sku}:{product_concert_date}:{product_description};{/new_products}'

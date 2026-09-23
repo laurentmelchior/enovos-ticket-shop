@@ -8,6 +8,11 @@ if (!defined('ABSPATH')) {
 final class EmailTemplateEditor {
     private const OPTION = 'enovos_ticket_shop_email_templates';
     private const DEFAULT_LINK_COLOR = '#7f54b3';
+    public const ESCH_GADGETS_COMPLETED_ORDER_ID = 'customer_completed_order_esch_gadgets';
+    private const COMPLETED_ORDER_ID = 'customer_completed_order';
+    private const ESCH_DELIVERY = 'Esch-sur-Alzette';
+    /** @var list<string> */
+    private const ESCH_GADGETS_CATEGORY_SLUGS = ['gadgets', 'others'];
     private static ?\WC_Email $active_email = null;
 
     public static function init(): void {
@@ -15,7 +20,13 @@ final class EmailTemplateEditor {
         add_filter('woocommerce_email_headers', [self::class, 'capture_email_from_headers'], 999, 4);
         add_filter('woocommerce_email_styles', [self::class, 'capture_email'], 1, 2);
         add_filter('woocommerce_mail_content', [self::class, 'replace_mail_content'], 999);
-        foreach (array_keys(self::settings()['subjects']) as $email_id) {
+        $subject_ids = array_keys(self::settings()['subjects']);
+        $subject_ids[] = self::COMPLETED_ORDER_ID;
+        foreach (array_unique($subject_ids) as $email_id) {
+            if ($email_id === self::ESCH_GADGETS_COMPLETED_ORDER_ID) {
+                // Virtual template key: WooCommerce still sends customer_completed_order.
+                continue;
+            }
             add_filter('woocommerce_email_subject_' . $email_id, [self::class, 'filter_subject'], 999, 3);
         }
     }
@@ -45,10 +56,15 @@ final class EmailTemplateEditor {
             return $content;
         }
         $settings = self::settings();
-        $template = (string) ($settings['templates'][$email->id] ?? '');
+        $template_id = self::content_template_id($email);
+        $template = (string) ($settings['templates'][$template_id] ?? '');
         $has_preheader_placeholder = str_contains($template, '{preheader}');
         if (!empty($settings['enabled']) && trim($template) !== '') {
-            $content = self::format_template($template, $email);
+            $content = self::format_template($template, $email, true, $template_id);
+        }
+        $preheader_id = self::meta_template_id($email, 'preheaders');
+        if ($preheader_id !== $email->id) {
+            $settings['preheaders'][$email->id] = (string) ($settings['preheaders'][$preheader_id] ?? '');
         }
         return self::apply_preheader($content, $email, $settings, $has_preheader_placeholder);
     }
@@ -62,26 +78,28 @@ final class EmailTemplateEditor {
         if (!$email instanceof \WC_Email || $email->id === '') {
             return $subject;
         }
-        $configured_subject = trim((string) (self::settings()['subjects'][$email->id] ?? ''));
+        $template_id = self::meta_template_id($email, 'subjects');
+        $configured_subject = trim((string) (self::settings()['subjects'][$template_id] ?? ''));
         if ($configured_subject === '') {
             return $subject;
         }
-        $formatted = self::format_template($configured_subject, $email);
+        $formatted = self::format_template($configured_subject, $email, true, $template_id);
         $formatted = trim(wp_specialchars_decode(wp_strip_all_tags($formatted), ENT_QUOTES));
         return $formatted !== '' ? $formatted : $subject;
     }
 
     public static function render_settings(): void {
-        $emails = self::emails();
+        $choices = self::email_choices();
         $selected_id = sanitize_key((string) ($_GET['email_id'] ?? ''));
-        if (!isset($emails[$selected_id])) {
-            $selected_id = (string) array_key_first($emails);
+        if (!isset($choices[$selected_id])) {
+            $selected_id = (string) array_key_first($choices);
         }
         $settings = self::settings();
         $template = (string) ($settings['templates'][$selected_id] ?? '');
         $subject = (string) ($settings['subjects'][$selected_id] ?? '');
         $preheader = (string) ($settings['preheaders'][$selected_id] ?? '');
-        $selected_email = $emails[$selected_id] ?? null;
+        $selected = $choices[$selected_id] ?? null;
+        $selected_email = is_array($selected) ? ($selected['email'] ?? null) : null;
 
         echo '<div class="enovos-card"><div class="enovos-card__header"><h2>' . esc_html__('Beefree HTML templates', 'enovos-ticket-shop') . '</h2>';
         echo '<p>' . esc_html__('Export the complete HTML from Beefree, select a WooCommerce email and paste it below.', 'enovos-ticket-shop') . '</p></div>';
@@ -96,8 +114,9 @@ final class EmailTemplateEditor {
         echo '<input type="hidden" name="section" value="email-templates">';
         echo '<label for="enovos_email_id"><strong>' . esc_html__('WooCommerce email', 'enovos-ticket-shop') . '</strong></label>';
         echo '<select id="enovos_email_id" name="email_id">';
-        foreach ($emails as $id => $email) {
-            echo '<option value="' . esc_attr($id) . '" ' . selected($selected_id, $id, false) . '>' . esc_html($email->get_title() . ' (' . $id . ')') . '</option>';
+        foreach ($choices as $id => $choice) {
+            echo '<option value="' . esc_attr($id) . '" ' . selected($selected_id, $id, false) . '>'
+                . esc_html((string) $choice['label']) . '</option>';
         }
         echo '</select><button class="button" type="submit">' . esc_html__('Open template', 'enovos-ticket-shop') . '</button></form>';
 
@@ -119,6 +138,14 @@ final class EmailTemplateEditor {
         echo '<input type="color" id="enovos_link_color" name="link_color" value="' . esc_attr($settings['link_color']) . '"></p>';
         echo '<p class="description">' . esc_html__('Used by links in the ready-made new-products table and available as {link_color} in custom HTML.', 'enovos-ticket-shop') . '</p>';
         echo '</div>';
+        if ($selected_id === self::ESCH_GADGETS_COMPLETED_ORDER_ID) {
+            echo '<div class="notice notice-info inline"><p>'
+                . esc_html__(
+                    'Sent instead of the standard Completed order email when the customer delivery field is Esch-sur-Alzette and every product in the order belongs to the gadgets or others category. Leave empty to keep the standard Completed order template for those orders.',
+                    'enovos-ticket-shop'
+                )
+                . '</p></div>';
+        }
         $default_subject = (string) $selected_email->get_option('subject', $selected_email->get_default_subject());
         echo '<p><label for="enovos_email_subject"><strong>' . esc_html__('Subject', 'woocommerce') . '</strong></label><br>';
         echo '<input type="text" id="enovos_email_subject" name="email_subject" class="large-text" value="' . esc_attr($subject) . '" placeholder="' . esc_attr($default_subject) . '"></p>';
@@ -126,7 +153,7 @@ final class EmailTemplateEditor {
         echo '<p><label for="enovos_email_preheader"><strong>' . esc_html__('Preheader text', 'enovos-ticket-shop') . '</strong></label><br>';
         echo '<input type="text" id="enovos_email_preheader" name="email_preheader" class="large-text" value="' . esc_attr($preheader) . '"></p>';
         echo '<p class="description">' . esc_html__('Preview text shown by email clients; 40–90 characters are recommended. Use {preheader} in custom HTML to control its position.', 'enovos-ticket-shop') . '</p>';
-        echo '<p><label for="enovos_email_template"><strong>' . esc_html($selected_email->get_title()) . '</strong></label></p>';
+        echo '<p><label for="enovos_email_template"><strong>' . esc_html((string) $selected['label']) . '</strong></label></p>';
         echo '<textarea id="enovos_email_template" name="email_template" class="large-text code enovos-email-template-code" spellcheck="false" placeholder="<!doctype html>">' . esc_textarea($template) . '</textarea>';
         echo '<p class="description">' . esc_html__('An empty field uses the original WooCommerce template. Custom HTML is sent as the complete email body without the WooCommerce header or footer.', 'enovos-ticket-shop') . '</p>';
         echo '<p><button class="button button-primary" type="submit">' . esc_html__('Save email template', 'enovos-ticket-shop') . '</button></p></div>';
@@ -140,8 +167,8 @@ final class EmailTemplateEditor {
         }
         $email_id = sanitize_key((string) ($_POST['email_id'] ?? ''));
         check_admin_referer('enovos_save_email_template_' . $email_id);
-        $emails = self::emails();
-        if (!isset($emails[$email_id])) {
+        $choices = self::email_choices();
+        if (!isset($choices[$email_id])) {
             wp_die(esc_html__('The selected WooCommerce email is invalid.', 'enovos-ticket-shop'));
         }
 
@@ -231,10 +258,34 @@ final class EmailTemplateEditor {
         return $emails;
     }
 
+    /**
+     * @return array<string,array{email:\WC_Email,label:string}>
+     */
+    private static function email_choices(): array {
+        $choices = [];
+        foreach (self::emails() as $id => $email) {
+            $choices[$id] = [
+                'email' => $email,
+                'label' => $email->get_title() . ' (' . $id . ')',
+            ];
+            if ($id === self::COMPLETED_ORDER_ID) {
+                $choices[self::ESCH_GADGETS_COMPLETED_ORDER_ID] = [
+                    'email' => $email,
+                    'label' => __(
+                        'Completed order – Esch-sur-Alzette (gadgets & others)',
+                        'enovos-ticket-shop'
+                    ) . ' (' . self::ESCH_GADGETS_COMPLETED_ORDER_ID . ')',
+                ];
+            }
+        }
+        return $choices;
+    }
+
     private static function format_template(
         string $template,
         \WC_Email $email,
-        bool $include_preheader = true
+        bool $include_preheader = true,
+        ?string $template_id = null
     ): string {
         $uses_new_products = preg_match(
             '/\{(?:#|\/)?(?:new_products|no_new_products)(?:_count|_date)?\}|\{product_[a-z_]+\}/',
@@ -249,10 +300,88 @@ final class EmailTemplateEditor {
                 $products,
                 $uses_new_products,
                 $include_preheader,
-                str_contains($template, '{password_reset_url}')
+                str_contains($template, '{password_reset_url}'),
+                $template_id ?? $email->id
             )
         );
         return $email->format_string($formatted);
+    }
+
+    /**
+     * Template storage key for the HTML body of a completed-order email.
+     */
+    private static function content_template_id(\WC_Email $email): string {
+        if (!self::is_esch_gadgets_completed_order($email)) {
+            return $email->id;
+        }
+        $variant = trim((string) (self::settings()['templates'][self::ESCH_GADGETS_COMPLETED_ORDER_ID] ?? ''));
+        return $variant !== '' ? self::ESCH_GADGETS_COMPLETED_ORDER_ID : $email->id;
+    }
+
+    /**
+     * Template storage key for subject or preheader overrides.
+     *
+     * @param 'subjects'|'preheaders' $meta_key
+     */
+    private static function meta_template_id(\WC_Email $email, string $meta_key): string {
+        if (!self::is_esch_gadgets_completed_order($email)) {
+            return $email->id;
+        }
+        $variant = trim((string) (self::settings()[$meta_key][self::ESCH_GADGETS_COMPLETED_ORDER_ID] ?? ''));
+        return $variant !== '' ? self::ESCH_GADGETS_COMPLETED_ORDER_ID : $email->id;
+    }
+
+    private static function is_esch_gadgets_completed_order(\WC_Email $email): bool {
+        if ($email->id !== self::COMPLETED_ORDER_ID) {
+            return false;
+        }
+        $order = $email->object ?? null;
+        return $order instanceof \WC_Order && self::order_matches_esch_gadgets($order);
+    }
+
+    private static function order_matches_esch_gadgets(\WC_Order $order): bool {
+        return self::order_has_esch_delivery($order) && self::order_products_are_gadgets_or_others($order);
+    }
+
+    private static function order_has_esch_delivery(\WC_Order $order): bool {
+        $user = $order->get_user();
+        if (!$user instanceof \WP_User) {
+            return false;
+        }
+        $delivery = DigestAdmin::delivery($user->ID);
+        if ($delivery === '') {
+            return false;
+        }
+        $normalized = strtolower(trim((string) preg_replace('/\s+/u', ' ', $delivery)));
+        $target = strtolower(self::ESCH_DELIVERY);
+        return $normalized === $target || str_contains($normalized, $target);
+    }
+
+    private static function order_products_are_gadgets_or_others(\WC_Order $order): bool {
+        $has_product = false;
+        foreach ($order->get_items() as $item) {
+            if (!$item instanceof \WC_Order_Item_Product) {
+                continue;
+            }
+            $product_id = absint($item->get_product_id());
+            if ($product_id <= 0) {
+                continue;
+            }
+            $has_product = true;
+            if (!self::product_in_esch_gadgets_categories($product_id)) {
+                return false;
+            }
+        }
+        return $has_product;
+    }
+
+    private static function product_in_esch_gadgets_categories(int $product_id): bool {
+        $terms = wp_get_post_terms($product_id, 'product_cat', ['fields' => 'slugs']);
+        if (!is_array($terms) || $terms === []) {
+            return false;
+        }
+        $slugs = array_map('strval', $terms);
+        return array_intersect(self::ESCH_GADGETS_CATEGORY_SLUGS, $slugs) !== [];
     }
 
     /**
@@ -323,7 +452,8 @@ final class EmailTemplateEditor {
         array $new_products = [],
         bool $include_new_products = false,
         bool $include_preheader = true,
-        bool $include_password_reset = false
+        bool $include_password_reset = false,
+        ?string $template_id = null
     ): array {
         $object = $email->object ?? null;
         $order = $object instanceof \WC_Order ? $object : null;
@@ -359,7 +489,8 @@ final class EmailTemplateEditor {
         $email_user = self::email_user($email, $order, $user);
         $settings = self::settings();
         $link_color = $settings['link_color'];
-        $preheader = trim((string) ($settings['preheaders'][$email->id] ?? ''));
+        $preheader_key = $template_id ?? $email->id;
+        $preheader = trim((string) ($settings['preheaders'][$preheader_key] ?? ''));
         $values = [
             '{site_title}' => esc_html((string) get_bloginfo('name')),
             '{site_address}' => esc_url($site_url),
@@ -437,15 +568,11 @@ final class EmailTemplateEditor {
     }
 
     private static function order_delivery(\WC_Order $order): string {
-        if (!function_exists('get_field')) {
-            return '';
-        }
         $user = $order->get_user();
         if (!$user instanceof \WP_User) {
             return '';
         }
-        $delivery = get_field('delivery', 'user_' . $user->ID);
-        return is_scalar($delivery) ? trim((string) $delivery) : '';
+        return DigestAdmin::delivery($user->ID);
     }
 
     private static function delivery_block(\WC_Order $order, string $delivery): string {
