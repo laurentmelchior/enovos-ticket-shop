@@ -19,6 +19,10 @@ final class DigestAdmin {
         add_filter('manage_users_sortable_columns', [self::class, 'add_sortable_column']);
         add_action('restrict_manage_users', [self::class, 'render_filter']);
         add_action('pre_get_users', [self::class, 'filter_users']);
+        add_action(
+            'woocommerce_admin_order_data_after_billing_address',
+            [self::class, 'render_order_subscription']
+        );
     }
 
     /**
@@ -56,6 +60,29 @@ final class DigestAdmin {
 
     public static function is_subscribed(int $user_id): bool {
         return (string) get_user_meta($user_id, DigestUnsubscribe::FIELD_NAME, true) === '1';
+    }
+
+    /**
+     * Shows the customer's current digest preference on every admin order.
+     *
+     * @param mixed $order
+     */
+    public static function render_order_subscription($order): void {
+        if (!$order instanceof \WC_Order) {
+            return;
+        }
+        $subscribed = $order->get_customer_id() > 0
+            && self::is_subscribed($order->get_customer_id());
+        $status = $subscribed
+            ? __('Subscribed', 'enovos-ticket-shop')
+            : __('Not subscribed', 'enovos-ticket-shop');
+
+        echo '<div class="enovos-order-digest">';
+        echo '<p><strong>' . esc_html__('New products emails', 'enovos-ticket-shop') . '</strong></p>';
+        echo '<p><span class="enovos-order-digest__status '
+            . ($subscribed ? 'is-subscribed' : 'is-not-subscribed') . '">'
+            . esc_html($status) . '</span></p>';
+        echo '</div>';
     }
 
     public static function delivery(int $user_id): string {

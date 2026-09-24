@@ -1352,6 +1352,47 @@ HTML;
         DigestAdmin::render_column('', DigestAdmin::COLUMN, 23),
         'Missing digest meta must display as not subscribed.'
     );
+
+    ob_start();
+    DigestAdmin::render_order_subscription(
+        new \WC_Order(new \WP_User(21, 'subscribed@example.test'), 'Subscribed', 'Customer')
+    );
+    $subscribed_order_status = (string) ob_get_clean();
+    assert_true(
+        str_contains($subscribed_order_status, 'New products emails')
+        && str_contains($subscribed_order_status, 'Subscribed')
+        && str_contains($subscribed_order_status, 'is-subscribed'),
+        'Orders for subscribed customers must show the current new-products email status.'
+    );
+
+    ob_start();
+    DigestAdmin::render_order_subscription(
+        new \WC_Order(new \WP_User(22, 'unsubscribed@example.test'), 'Unsubscribed', 'Customer')
+    );
+    $unsubscribed_order_status = (string) ob_get_clean();
+    assert_true(
+        str_contains($unsubscribed_order_status, 'Not subscribed')
+        && str_contains($unsubscribed_order_status, 'is-not-subscribed'),
+        'Orders for unsubscribed customers must show Not subscribed.'
+    );
+
+    ob_start();
+    DigestAdmin::render_order_subscription(new \WC_Order(false, 'Guest', 'Customer'));
+    $guest_order_status = (string) ob_get_clean();
+    assert_true(
+        str_contains($guest_order_status, 'Not subscribed')
+        && str_contains($guest_order_status, 'is-not-subscribed'),
+        'Guest orders must show Not subscribed because they have no customer preference.'
+    );
+
+    ob_start();
+    DigestAdmin::render_order_subscription(new \stdClass());
+    assert_same(
+        '',
+        (string) ob_get_clean(),
+        'The order subscription renderer must ignore unsupported objects.'
+    );
+
     assert_same(
         'unchanged',
         DigestAdmin::render_column('unchanged', 'enovos_approval_status', 21),

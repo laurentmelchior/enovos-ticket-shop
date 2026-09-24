@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 0.7.21 – 2026-09-24
+- Added the customer's current new-products email subscription status to every WooCommerce admin order.
+
 ## Version 0.7.20 – 2026-09-24
 - Showed the customer's ACF Delivery location on every WooCommerce order (admin shipping column, customer order details and default order emails), and stored a snapshot on the order at checkout.
 
