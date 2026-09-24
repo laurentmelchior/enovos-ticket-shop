@@ -56,7 +56,7 @@ An administrator can enter or replace the price manually. A positive reviewed pr
 Under **Enovos WooCommerce Addons > Settings > Ticket Shop** you can also enable/disable:
 
 - Publish products immediately (otherwise drafts)
-- Attach Me! sync when the plugin is available
+- Attach Me sync when Vanquish Attach Me or legacy CodeCanyon Attach Me! is available
 - Native WooCommerce email PDF attachment
 - Atelier enrichment during analysis
 - Import / Debug Log panel on the dashboard
@@ -73,11 +73,11 @@ Under **Enovos WooCommerce Addons > Settings > Ticket Shop** you can also enable
 
 ## Order support and delivery
 
-The WooCommerce order screen can show a compact **Enovos tickets** box beside Attach Me!. It lists the assigned concert, package number, ticket pages and Enovos inventory status. Attach Me! remains responsible for the attachment list, secure customer downloads and embedding the PDF in the configured customer email.
+The WooCommerce order screen can show a compact **Enovos tickets** box beside Attach Me. It lists the assigned concert, package number, ticket pages and Enovos inventory status. Attach Me (Vanquish or legacy CodeCanyon) remains responsible for the attachment list, secure customer downloads and embedding the PDF in the configured customer email.
 
-Customer visibility follows **Ticket delivery status**. With the default `Completed` setting, Attach Me! registers the file on the order immediately but hides it from Order Details and My Account until the order is Completed. With `Processing`, it is visible for both Processing and Completed orders.
+Customer visibility follows **Ticket delivery status**. With the default `Completed` setting, Attach Me registers the file on the order immediately but hides it from Order Details and My Account until the order is Completed. With `Processing`, it is visible for both Processing and Completed orders.
 
-For delivered packages, administrators can resend the configured Completed or Processing customer email. The same Attach Me! files are used again: no new package is reserved and stock does not change. Successful original and repeated deliveries can be recorded in the order notes.
+For delivered packages, administrators can resend the configured Completed or Processing customer email. The same Attach Me files are used again: no new package is reserved and stock does not change. Successful original and repeated deliveries can be recorded in the order notes.
 
 The plugin explicitly supports WooCommerce HPOS and also reserves ticket packages when an order is created through the Store API / Block Checkout.
 
@@ -91,7 +91,7 @@ When enabled, **Settings > Ticket Shop** shows read-only preflight checks for:
 - credentials for the selected AI provider
 - Atelier page access, including Cloudflare blocking, event-date parsing and header-image availability
 - writable protected uploads
-- an active and enabled Attach Me! installation
+- an active and enabled Attach Me installation (Vanquish Attach Me for WooCommerce, or the legacy CodeCanyon Attach Me! plugin)
 
 ## Feature switches and rollback
 
@@ -269,7 +269,7 @@ The following complete HTML document can be pasted into the editor and then rest
 
 A package is reserved for the order as soon as the order is created. Ticket PDFs are sent only when the order reaches **Completed** (default):
 
-1. **Attach Me! (preferred when installed):** the reserved ticket PDF is registered in the order Attachments box and embedded only in the Completed customer email.
+1. **Attach Me (preferred when installed):** the reserved ticket PDF is registered in the order Attachments box and embedded only in the Completed customer email. Supports [Vanquish Attach Me for WooCommerce](https://wordpress.org/plugins/vanquish-attach-me-for-woocommerce/) (WordPress.org successor) and the legacy CodeCanyon Attach Me! plugin. Prefer only one of those plugins active.
 2. **Native fallback:** the PDF is attached through WooCommerce's `woocommerce_email_attachments` filter to the Completed customer order email.
 
 The delivery status can still be switched to Processing in AI Settings if needed.

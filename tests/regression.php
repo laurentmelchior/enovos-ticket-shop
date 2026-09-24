@@ -279,6 +279,10 @@ namespace {
         return $GLOBALS['test_options'][$name] ?? $default;
     }
 
+    function is_plugin_active(string $plugin): bool {
+        return in_array($plugin, $GLOBALS['test_active_plugins'] ?? [], true);
+    }
+
     function is_admin(): bool {
         return !empty($GLOBALS['test_is_admin']);
     }
@@ -526,6 +530,7 @@ namespace Enovos\TicketShop {
     require_once dirname(__DIR__) . '/includes/class-enovos-new-products.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-email-template-editor.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-ticket-shop.php';
+    require_once dirname(__DIR__) . '/includes/class-enovos-ticket-attach-me.php';
 
     function invoke_private(string $class, string $method, mixed ...$arguments): mixed {
         $reflection = new \ReflectionMethod($class, $method);
@@ -1461,6 +1466,81 @@ HTML;
     unset($_GET[DigestAdmin::FILTER], $GLOBALS['pagenow']);
     $GLOBALS['test_is_admin'] = false;
     $GLOBALS['test_caps'] = [];
+
+    // Attach Me / Vanquish Attach Me driver detection and payload shape.
+    $GLOBALS['test_active_plugins'] = [];
+    assert_same(null, AttachMe::driver(), 'No attachment plugin must yield a null driver.');
+    assert_true(!AttachMe::is_active(), 'Attach Me must be inactive when neither plugin is installed.');
+
+    $GLOBALS['test_active_plugins'] = ['woocommerce-attach-me/attach-me.php'];
+    assert_same(AttachMe::DRIVER_WCAM, AttachMe::driver(), 'Legacy CodeCanyon Attach Me! must be detected.');
+    assert_same('Attach Me!', AttachMe::label(), 'Legacy driver label must stay Attach Me!.');
+
+    $GLOBALS['test_active_plugins'] = [
+        'vanquish-attach-me-for-woocommerce/vanquish-attach-me-for-woocommerce.php',
+    ];
+    assert_same(AttachMe::DRIVER_VANQUISH, AttachMe::driver(), 'Vanquish Attach Me must be detected.');
+    assert_same('Vanquish Attach Me', AttachMe::label(), 'Vanquish driver label must identify the successor plugin.');
+
+    $GLOBALS['test_active_plugins'] = [
+        'woocommerce-attach-me/attach-me.php',
+        'vanquish-attach-me-for-woocommerce/vanquish-attach-me-for-woocommerce.php',
+    ];
+    assert_same(
+        AttachMe::DRIVER_VANQUISH,
+        AttachMe::driver(),
+        'When both plugins are active, Vanquish (the maintained successor) must be preferred.'
+    );
+    $GLOBALS['test_active_plugins'] = [];
+
+    assert_same(
+        'customer_completed_order',
+        AttachMe::delivery_email_id('completed'),
+        'Completed delivery must target the WooCommerce completed customer email.'
+    );
+    assert_same(
+        'customer_processing_order',
+        AttachMe::delivery_email_id('processing'),
+        'Processing delivery must target the WooCommerce processing customer email.'
+    );
+
+    $hidden_completed = AttachMe::hidden_order_statuses('completed');
+    assert_true(
+        in_array('wc-processing', $hidden_completed, true) && !in_array('wc-completed', $hidden_completed, true),
+        'Completed delivery must hide tickets while the order is still processing.'
+    );
+    $hidden_processing = AttachMe::hidden_order_statuses('processing');
+    assert_true(
+        !in_array('wc-processing', $hidden_processing, true) && !in_array('wc-completed', $hidden_processing, true),
+        'Processing delivery must show tickets for both processing and completed orders.'
+    );
+
+    $vanquish_item = AttachMe::vanquish_attachment_record(
+        [
+            'title' => 'Night Concert – Ticket package 3',
+            'media_id' => 42,
+            'file_name' => 'night-concert-ticket-package-3.pdf',
+        ],
+        ['wc-pending', 'wc-processing'],
+        'customer_completed_order'
+    );
+    assert_same('media', $vanquish_item['source'], 'Vanquish records must use the media-library source.');
+    assert_same(42, $vanquish_item['media_id'], 'Vanquish records must keep the media attachment id.');
+    assert_same(
+        ['customer_completed_order'],
+        $vanquish_item['emails'],
+        'Vanquish records must embed the PDF only in the configured customer email.'
+    );
+    assert_same(
+        ['wc-pending', 'wc-processing'],
+        $vanquish_item['hide_statuses'],
+        'Vanquish records must honour the same hide-by-status rules as legacy Attach Me!.'
+    );
+    assert_same(
+        'application/pdf',
+        $vanquish_item['mime'],
+        'Ticket packages registered in Vanquish must be typed as PDF.'
+    );
 
     echo "All regression tests passed.\n";
 }

@@ -6,12 +6,58 @@ if (!defined('ABSPATH')) {
 }
 
 /**
- * Registers reserved ticket PDFs in WooCommerce Attach Me! (WCAM)
+ * Registers reserved ticket PDFs in Attach Me! / Vanquish Attach Me
  * so they appear on the order Attachments box / My Account and can be
- * embedded in the Completed customer email by Attach Me! itself.
+ * embedded in the configured customer email by that plugin.
+ *
+ * Supports:
+ * - Legacy CodeCanyon "WooCommerce Attach Me!" (WCAM) via its AJAX upload flow
+ * - Successor "Vanquish Attach Me for WooCommerce" via OrderAttachments::add()
+ *
+ * When both are active, Vanquish is preferred (the legacy plugin is no longer
+ * developed). Keep only one active to avoid duplicate email attachments.
  */
 final class AttachMe {
+    public const DRIVER_VANQUISH = 'vanquish';
+    public const DRIVER_WCAM = 'wcam';
+
     public static function is_active(): bool {
+        return self::driver() !== null;
+    }
+
+    /**
+     * Which attachment plugin will handle ticket delivery, if any.
+     * Prefers Vanquish (WordPress.org successor) over legacy WCAM.
+     */
+    public static function driver(): ?string {
+        if (self::is_vanquish_active()) {
+            return self::DRIVER_VANQUISH;
+        }
+        if (self::is_wcam_active()) {
+            return self::DRIVER_WCAM;
+        }
+        return null;
+    }
+
+    public static function is_vanquish_active(): bool {
+        if (defined('VANAM_VERSION') || class_exists('\\Vanquish\\AttachMe\\Com\\OrderAttachments')) {
+            return true;
+        }
+        if (!function_exists('is_plugin_active')) {
+            require_once ABSPATH . 'wp-admin/includes/plugin.php';
+        }
+        foreach ([
+            'vanquish-attach-me-for-woocommerce/vanquish-attach-me-for-woocommerce.php',
+            'vanquish-attach-me-for-woocommerce-premium/vanquish-attach-me-for-woocommerce.php',
+        ] as $plugin) {
+            if (is_plugin_active($plugin)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static function is_wcam_active(): bool {
         if (defined('WCAM_PLUGIN_ABS_PATH') || class_exists('WCAM_File') || class_exists('WCAM_Order')) {
             return true;
         }
@@ -30,20 +76,42 @@ final class AttachMe {
         return false;
     }
 
+    /**
+     * Human-readable label for the detected driver (or generic when none).
+     */
+    public static function label(): string {
+        return match (self::driver()) {
+            self::DRIVER_VANQUISH => 'Vanquish Attach Me',
+            self::DRIVER_WCAM => 'Attach Me!',
+            default => 'Attach Me!',
+        };
+    }
+
     public static function sync_order(\WC_Order $order): void {
         $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), Plugin::defaults());
         if (empty($settings['enable_attach_me'])) {
             return;
         }
-        if (!self::is_active()) {
+        $driver = self::driver();
+        if ($driver === null) {
             return;
         }
-        // Avoid re-entrancy during Attach Me! AJAX itself.
-        if (wp_doing_ajax() && isset($_REQUEST['action']) && sanitize_key((string) $_REQUEST['action']) === 'upload_attachments') {
+        // Avoid re-entrancy during legacy Attach Me! AJAX itself.
+        if (
+            $driver === self::DRIVER_WCAM
+            && wp_doing_ajax()
+            && isset($_REQUEST['action'])
+            && sanitize_key((string) $_REQUEST['action']) === 'upload_attachments'
+        ) {
             return;
         }
-        if (!has_action('wp_ajax_upload_attachments')) {
+        if ($driver === self::DRIVER_WCAM && !has_action('wp_ajax_upload_attachments')) {
             Logger::log('FAIL', 'Attach Me! is active but upload_attachments AJAX action is missing');
+            self::schedule($order->get_id());
+            return;
+        }
+        if ($driver === self::DRIVER_VANQUISH && !class_exists('\\Vanquish\\AttachMe\\Com\\OrderAttachments')) {
+            Logger::log('FAIL', 'Vanquish Attach Me is active but OrderAttachments class is missing');
             self::schedule($order->get_id());
             return;
         }
@@ -65,9 +133,10 @@ final class AttachMe {
                 continue;
             }
             if (empty($row['pdf_path']) || !is_readable($row['pdf_path'])) {
-                Logger::log('FAIL', 'Attach Me! sync skipped unreadable ticket PDF', [
+                Logger::log('FAIL', self::label() . ' sync skipped unreadable ticket PDF', [
                     'order_id' => $order->get_id(),
                     'package_id' => $package_id,
+                    'driver' => $driver,
                 ]);
                 continue;
             }
@@ -82,10 +151,11 @@ final class AttachMe {
         foreach ($pending as $row) {
             $media = self::ensure_media_attachment((string) $row['pdf_path'], (string) ($row['concert_title'] ?? 'Ticket'), (int) $row['package_no']);
             if (is_wp_error($media)) {
-                Logger::log('FAIL', 'Attach Me! media preparation failed', [
+                Logger::log('FAIL', self::label() . ' media preparation failed', [
                     'order_id' => $order->get_id(),
                     'package_id' => (int) $row['id'],
                     'error' => $media->get_error_message(),
+                    'driver' => $driver,
                 ]);
                 continue;
             }
@@ -98,6 +168,7 @@ final class AttachMe {
                 ),
                 'media_id' => (int) $media['id'],
                 'url' => (string) $media['url'],
+                'file_name' => basename((string) get_attached_file((int) $media['id']) ?: (string) $row['pdf_path']),
             ];
         }
 
@@ -105,9 +176,14 @@ final class AttachMe {
             return;
         }
 
-        $ok = self::register_gallery_attachments($order->get_id(), $media_items);
+        $ok = $driver === self::DRIVER_VANQUISH
+            ? self::register_vanquish_attachments($order, $media_items)
+            : self::register_gallery_attachments($order->get_id(), $media_items);
         if (!$ok) {
-            Logger::log('FAIL', 'Attach Me! upload_attachments call failed', ['order_id' => $order->get_id()]);
+            Logger::log('FAIL', self::label() . ' attachment registration failed', [
+                'order_id' => $order->get_id(),
+                'driver' => $driver,
+            ]);
             self::schedule($order->get_id());
             return;
         }
@@ -117,14 +193,17 @@ final class AttachMe {
         }
         $order->update_meta_data('_enovos_wcam_synced_package_ids', array_values(array_unique($synced)));
         $order->update_meta_data('_enovos_wcam_synced_at', current_time('mysql'));
+        $order->update_meta_data('_enovos_attach_me_driver', $driver);
         $order->save();
         $order->add_order_note(sprintf(
-            'Enovos WooCommerce Addons: %d ticket PDF(s) registered in Attach Me! attachments.',
-            count($media_items)
+            'Enovos WooCommerce Addons: %d ticket PDF(s) registered in %s attachments.',
+            count($media_items),
+            self::label()
         ));
-        Logger::log('OK', 'Ticket PDFs registered in Attach Me!', [
+        Logger::log('OK', 'Ticket PDFs registered in ' . self::label(), [
             'order_id' => $order->get_id(),
             'packages' => count($media_items),
+            'driver' => $driver,
         ]);
     }
 
@@ -136,7 +215,7 @@ final class AttachMe {
         $args = [$order_id];
         if (!wp_next_scheduled($hook, $args)) {
             wp_schedule_single_event(time() + 15, $hook, $args);
-            Logger::log('STEP', 'Scheduled deferred Attach Me! sync', ['order_id' => $order_id]);
+            Logger::log('STEP', 'Scheduled deferred ' . self::label() . ' sync', ['order_id' => $order_id]);
         }
     }
 
@@ -148,7 +227,7 @@ final class AttachMe {
     }
 
     /**
-     * Statuses in which Attach Me! must hide a customer ticket download.
+     * Statuses in which Attach Me must hide a customer ticket download.
      * Unknown/custom statuses are denied by default.
      *
      * @return list<string>
@@ -170,6 +249,35 @@ final class AttachMe {
             ? ['wc-processing', 'wc-completed']
             : ['wc-completed'];
         return array_values(array_diff(array_unique($statuses), $allowed));
+    }
+
+    /**
+     * WooCommerce email id that should carry the ticket PDF.
+     */
+    public static function delivery_email_id(string $delivery_status): string {
+        return $delivery_status === 'processing'
+            ? 'customer_processing_order'
+            : 'customer_completed_order';
+    }
+
+    /**
+     * Build a Vanquish Attach Me attachment record for a media-library PDF.
+     *
+     * @param array{title:string,media_id:int,file_name?:string} $item
+     * @param list<string> $hidden_statuses
+     * @return array<string,mixed>
+     */
+    public static function vanquish_attachment_record(array $item, array $hidden_statuses, string $email_id): array {
+        return [
+            'title' => (string) $item['title'],
+            'description' => '',
+            'source' => 'media',
+            'media_id' => (int) $item['media_id'],
+            'file_name' => (string) ($item['file_name'] ?? ''),
+            'mime' => 'application/pdf',
+            'emails' => [$email_id],
+            'hide_statuses' => array_values($hidden_statuses),
+        ];
     }
 
     private static function ensure_media_attachment(string $pdf_path, string $title, int $package_no) {
@@ -214,6 +322,76 @@ final class AttachMe {
         }
 
         return ['id' => (int) $attachment_id, 'url' => $url];
+    }
+
+    /**
+     * Register ticket PDFs through Vanquish Attach Me's public OrderAttachments API.
+     *
+     * @param array<int, array{package_id:int,title:string,media_id:int,url:string,file_name:string}> $items
+     */
+    private static function register_vanquish_attachments(\WC_Order $order, array $items): bool {
+        if (!class_exists('\\Vanquish\\AttachMe\\Com\\OrderAttachments')) {
+            return false;
+        }
+
+        $settings = wp_parse_args(get_option('enovos_ticket_shop_settings', []), Plugin::defaults());
+        $delivery = $settings['delivery_order_status'] ?? 'completed';
+        $hidden_statuses = self::hidden_order_statuses($delivery);
+        $email_id = self::delivery_email_id($delivery);
+        $service = new \Vanquish\AttachMe\Com\OrderAttachments();
+
+        $registered = 0;
+        foreach ($items as $item) {
+            // Skip if this media file is already on the order (e.g. after a partial retry).
+            if (self::vanquish_has_media($service, $order, (int) $item['media_id'])) {
+                $registered++;
+                continue;
+            }
+            try {
+                $id = $service->add($order, self::vanquish_attachment_record($item, $hidden_statuses, $email_id));
+            } catch (\Throwable $e) {
+                Logger::log('FAIL', 'Vanquish Attach Me add() exception', [
+                    'order_id' => $order->get_id(),
+                    'package_id' => (int) $item['package_id'],
+                    'error' => $e->getMessage(),
+                ]);
+                return false;
+            }
+            if ($id === '' || $id === null) {
+                Logger::log('FAIL', 'Vanquish Attach Me add() returned empty id', [
+                    'order_id' => $order->get_id(),
+                    'package_id' => (int) $item['package_id'],
+                ]);
+                return false;
+            }
+            $registered++;
+        }
+
+        Logger::log('STEP', 'Vanquish Attach Me attachments registered', [
+            'order_id' => $order->get_id(),
+            'items' => count($items),
+            'registered' => $registered,
+            'email_id' => $email_id,
+        ]);
+        return $registered === count($items);
+    }
+
+    /**
+     * @param object $service Vanquish\AttachMe\Com\OrderAttachments
+     */
+    private static function vanquish_has_media(object $service, \WC_Order $order, int $media_id): bool {
+        if ($media_id <= 0 || !method_exists($service, 'all')) {
+            return false;
+        }
+        foreach ((array) $service->all($order) as $existing) {
+            if (!is_array($existing)) {
+                continue;
+            }
+            if ((int) ($existing['media_id'] ?? 0) === $media_id) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
