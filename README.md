@@ -1,9 +1,5 @@
 # Enovos WooCommerce Addons
 
-> **Repository moved:** Active development, releases and FTP deployments now
-> live in [`laurentmelchior/assets-hub/enovos-ticket-shop`](https://github.com/laurentmelchior/assets-hub/tree/main/enovos-ticket-shop).
-> This repository is retained only for its historical context.
-
 WordPress / WooCommerce plugin for importing concert ticket PDFs into products and securely allocating two-ticket PDF packages to customer orders.
 
 ## Requirements
@@ -291,14 +287,9 @@ Master PDFs, generated ticket packages and the import debug log are stored under
 
 ## Releases
 
-Releases are now created from the
-[`enovos-ticket-shop`](https://github.com/laurentmelchior/assets-hub/tree/main/enovos-ticket-shop)
-directory in `assets-hub`. Every change ships as its own new version. Never
-reuse or extend an already released version.
+Every change ships as its own new version. Never reuse or extend an already released version.
 
 1. Raise the version in `enovos-ticket-shop.php`, both in the plugin header `Version:` and in `ENOVOS_TICKET_SHOP_VERSION`.
 2. Add a new `## Version X.Y.Z – YYYY-MM-DD` section at the top of `CHANGELOG.md` describing that change.
 
-Pushing both files to `assets-hub/main` lets the central release workflow tag
-the version and build the update package, so the update checker offers the new
-version to every site.
+Pushing both files to `main` lets the release workflow tag the version and build the update package, so the update checker offers the new version to every site.
