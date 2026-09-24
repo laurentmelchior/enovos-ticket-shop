@@ -1,5 +1,9 @@
 # Changelog
 
+## Version 0.7.20 – 2026-09-24
+- Added support for Vanquish Attach Me for WooCommerce (WordPress.org successor to CodeCanyon Attach Me!): ticket PDFs register through its `OrderAttachments` API when that plugin is active.
+- Kept the existing CodeCanyon Attach Me! sync path; when both plugins are active Vanquish is preferred. Keep only one active to avoid duplicate email attachments.
+
 ## Version 0.7.19 – 2026-09-24
 - Removed the duplicated screen-reader price range from `{product_price}` and the ready-made `{new_products}` table, so variable products no longer show "Price range: … through …" next to the visible amount in emails.
 

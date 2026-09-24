@@ -233,6 +233,7 @@ final class Plugin {
         $settings = self::settings();
         $engine = PdfPackages::engine_status();
         $attach_me_on = AttachMe::is_active() && !empty($settings['enable_attach_me']);
+        $attach_label = AttachMe::is_active() ? AttachMe::label() : 'Attach Me!';
 
         echo '<div class="wrap enovos-admin enovos-admin--wide"><h1>Enovos WooCommerce Addons</h1>';
         echo '<p class="enovos-admin-lead">Import concert ticket PDFs, create protected two-ticket packages, and deliver them with WooCommerce orders.</p>';
@@ -245,7 +246,7 @@ final class Plugin {
         echo '<div class="enovos-status-card"><span class="label">Version</span><span class="value">' . esc_html(ENOVOS_TICKET_SHOP_VERSION) . '</span></div>';
         echo '<div class="enovos-status-card"><span class="label">AI provider</span><span class="value">' . esc_html(ucfirst((string) $settings['ai_provider'])) . '</span></div>';
         echo '<div class="enovos-status-card"><span class="label">PDF engine</span><span class="value ' . (!empty($engine['available']) ? 'is-ok' : 'is-warn') . '">' . esc_html((string) ($engine['engine'] ?? 'unavailable')) . '</span></div>';
-        echo '<div class="enovos-status-card"><span class="label">Attach Me!</span><span class="value ' . ($attach_me_on ? 'is-ok' : 'is-warn') . '">' . ($attach_me_on ? 'Active' : (AttachMe::is_active() ? 'Disabled in settings' : 'Not installed')) . '</span></div>';
+        echo '<div class="enovos-status-card"><span class="label">' . esc_html($attach_label) . '</span><span class="value ' . ($attach_me_on ? 'is-ok' : 'is-warn') . '">' . ($attach_me_on ? 'Active' : (AttachMe::is_active() ? 'Disabled in settings' : 'Not installed')) . '</span></div>';
         echo '<div class="enovos-status-card"><span class="label">Ticket delivery</span><span class="value">' . esc_html(ucfirst((string) $settings['delivery_order_status'])) . '</span></div>';
         echo '</div>';
 
@@ -615,17 +616,17 @@ final class Plugin {
             echo '<tr><th>Admin list size</th><td><input class="small-text" type="number" min="10" max="500" name="enovos_ticket_shop_settings[admin_page_size]" value="' . esc_attr((string) $s['admin_page_size']) . '"> <span class="description">Rows shown in Ticket Inventory and lines in the debug log view.</span></td></tr>';
             echo '</table><ul class="enovos-toggle-list">';
             $this->toggle('publish_products', (int) $s['publish_products'], 'Publish products immediately', 'When off, imported concerts stay as drafts until you publish them.');
-            $this->toggle('enable_attach_me', (int) $s['enable_attach_me'], 'Use Attach Me! when available', 'Register reserved ticket PDFs on the WooCommerce order Attachments box.');
-            $this->toggle('enable_native_email_attach', (int) $s['enable_native_email_attach'], 'Native email PDF attachment', 'Attach ticket PDFs directly to the WooCommerce customer email when Attach Me! is not used.');
+            $this->toggle('enable_attach_me', (int) $s['enable_attach_me'], 'Use Attach Me when available', 'Register reserved ticket PDFs on the order Attachments box via Vanquish Attach Me (WordPress.org) or the legacy CodeCanyon Attach Me! plugin. Prefer only one of those plugins active.');
+            $this->toggle('enable_native_email_attach', (int) $s['enable_native_email_attach'], 'Native email PDF attachment', 'Attach ticket PDFs directly to the WooCommerce customer email when Attach Me is not used.');
             $this->toggle('enable_atelier_enrichment', (int) $s['enable_atelier_enrichment'], 'Atelier enrichment', 'Fetch artist/group image and extra Atelier page data during PDF analysis.');
             echo '</ul></div></div>';
 
             echo '<div class="enovos-card"><div class="enovos-card__header"><h2>Order support &amp; diagnostics</h2><p>Each addition can be disabled independently without removing ticket or order data.</p></div><div class="enovos-card__body"><ul class="enovos-toggle-list">';
-            $this->toggle('enable_order_ticket_box', (int) $s['enable_order_ticket_box'], 'Ticket status box on orders', 'Show Enovos package status beside the Attach Me! box.');
-            $this->toggle('enable_ticket_resend', (int) $s['enable_ticket_resend'], 'Resend ticket email', 'Allow administrators to trigger the existing Attach Me! customer email again.');
-            $this->toggle('enable_system_check', (int) $s['enable_system_check'], 'System check', 'Show the PDF, tax, category, AI, uploads and Attach Me! preflight checks.');
+            $this->toggle('enable_order_ticket_box', (int) $s['enable_order_ticket_box'], 'Ticket status box on orders', 'Show Enovos package status beside the Attach Me attachments box.');
+            $this->toggle('enable_ticket_resend', (int) $s['enable_ticket_resend'], 'Resend ticket email', 'Allow administrators to trigger the existing Attach Me customer email again.');
+            $this->toggle('enable_system_check', (int) $s['enable_system_check'], 'System check', 'Show the PDF, tax, category, AI, uploads and Attach Me preflight checks.');
             $this->toggle('enable_delivery_order_note', (int) $s['enable_delivery_order_note'], 'Ticket delivery order note', 'Record successful original and resent ticket emails in the order notes.');
-            $this->toggle('enable_attachment_repair', (int) $s['enable_attachment_repair'], 'Existing attachment repair', 'Audit and repair customer visibility for Enovos ticket attachments created before version 0.7.0.');
+            $this->toggle('enable_attachment_repair', (int) $s['enable_attachment_repair'], 'Existing attachment repair', 'Audit and repair customer visibility for legacy CodeCanyon Attach Me! attachments created before version 0.7.0.');
             echo '</ul></div></div>';
 
             if (!empty($s['enable_system_check'])) {
@@ -1126,16 +1127,17 @@ final class Plugin {
             return $attachments;
         }
 
-        // When Attach Me! already owns email embedding for this order, avoid
+        // When Attach Me already owns email embedding for this order, avoid
         // duplicate PDF attachments in the same message.
         if (
             self::enabled('enable_attach_me')
             && AttachMe::is_active()
             && $object->get_meta('_enovos_wcam_synced_package_ids')
         ) {
-            Logger::log('STEP', 'Ticket PDFs left to Attach Me! email embedding', [
+            Logger::log('STEP', 'Ticket PDFs left to ' . AttachMe::label() . ' email embedding', [
                 'order_id' => $object->get_id(),
                 'email_id' => $email_id,
+                'driver' => AttachMe::driver(),
             ]);
             TicketInventory::mark_delivered($object->get_id());
             return $attachments;

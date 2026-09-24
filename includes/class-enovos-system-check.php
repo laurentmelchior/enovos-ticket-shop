@@ -98,10 +98,16 @@ final class SystemCheck {
             ],
             [
                 'ok' => !empty($settings['enable_attach_me']) && AttachMe::is_active(),
-                'label' => __('Attach Me!', 'enovos-ticket-shop'),
+                'label' => AttachMe::is_active()
+                    ? AttachMe::label()
+                    : __('Attach Me!', 'enovos-ticket-shop'),
                 'message' => !empty($settings['enable_attach_me']) && AttachMe::is_active()
-                    ? __('Attach Me! is active and enabled for ticket delivery.', 'enovos-ticket-shop')
-                    : __('Activate Attach Me! and enable it in the delivery settings.', 'enovos-ticket-shop'),
+                    ? sprintf(
+                        /* translators: %s: Attach Me! or Vanquish Attach Me */
+                        __('%s is active and enabled for ticket delivery.', 'enovos-ticket-shop'),
+                        AttachMe::label()
+                    )
+                    : __('Activate Attach Me! or Vanquish Attach Me and enable it in the delivery settings.', 'enovos-ticket-shop'),
             ],
         ];
     }
