@@ -77,6 +77,8 @@ The WooCommerce order screen can show a compact **Enovos tickets** box beside At
 
 The same order screen shows the customer's ACF **Delivery** location (Esch-sur-Alzette, Creos Luxembourg-Merl, and the other select values) under Shipping, including orders with no shipping address. The value is copied onto the order at checkout so later profile changes do not rewrite past orders. Existing orders without that snapshot still read the current customer field. The location is also listed on My Account order details and in default WooCommerce order emails. Guest orders have no user field, so Delivery stays empty. The ACF placeholder `none` / `-- SELECT --` is treated as empty.
 
+Under Billing, every admin order also shows **New products emails** with the customer's current `send_daily_digest` preference: **Subscribed** or **Not subscribed**. Guest orders are shown as not subscribed. This is the live customer preference rather than a checkout snapshot, so an unsubscribe is reflected on existing orders immediately.
+
 Customer visibility follows **Ticket delivery status**. With the default `Completed` setting, Attach Me! registers the file on the order immediately but hides it from Order Details and My Account until the order is Completed. With `Processing`, it is visible for both Processing and Completed orders.
 
 For delivered packages, administrators can resend the configured Completed or Processing customer email. The same Attach Me! files are used again: no new package is reserved and stock does not change. Successful original and repeated deliveries can be recorded in the order notes.
