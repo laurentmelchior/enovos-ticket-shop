@@ -1,0 +1,100 @@
+name: Deploy plugin to FTP
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read plugin version
+        id: version
+        run: |
+          VERSION=$(grep -E '^\s*\*\s*Version:' enovos-ticket-shop.php | sed -E 's/.*Version:\s*//')
+          if [ -z "$VERSION" ]; then
+            echo "Could not read Version from enovos-ticket-shop.php"
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Plugin version: $VERSION"
+
+      - name: Build changelog HTML
+        id: changelog
+        run: |
+          # CHANGELOG.md lines → single HTML string with <br /> (matches update.json format)
+          CHANGELOG=$(awk 'NF{printf "%s<br />", $0}' CHANGELOG.md | sed 's/<br \/>$//')
+          {
+            echo "html<<EOF"
+            echo "$CHANGELOG"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate update.json
+        run: |
+          python3 <<'PY'
+          import json
+          import os
+          import pathlib
+
+          version = os.environ["VERSION"]
+          changelog = os.environ["CHANGELOG"]
+
+          template = json.loads(pathlib.Path("update.example.json").read_text())
+          template["version"] = version
+          template["download_url"] = template["download_url"].replace("<VERSION>", version)
+          template["sections"]["changelog"] = changelog
+
+          out = pathlib.Path("dist/upload")
+          out.mkdir(parents=True, exist_ok=True)
+          (out / "update.json").write_text(
+              json.dumps(template, indent="\t", ensure_ascii=False) + "\n"
+          )
+          print((out / "update.json").read_text())
+          PY
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          CHANGELOG: ${{ steps.changelog.outputs.html }}
+
+      - name: Build plugin zip
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PLUGIN_SLUG="enovos-ticket-shop"
+          ZIP_NAME="${PLUGIN_SLUG}-${VERSION}.zip"
+
+          mkdir -p "dist/build/${PLUGIN_SLUG}" "dist/upload"
+
+          # Package as enovos-ticket-shop/... so WordPress installs under the right folder
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='dist' \
+            --exclude='update.example.json' \
+            --exclude='*.zip' \
+            ./ "dist/build/${PLUGIN_SLUG}/"
+
+          (
+            cd dist/build
+            zip -r "../upload/${ZIP_NAME}" "$PLUGIN_SLUG"
+          )
+
+          echo "Built dist/upload/${ZIP_NAME}"
+          ls -lh dist/upload/
+
+      - name: Upload zip and update.json to FTP
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          # Override with repository variables if your host needs FTPS / another port / path
+          protocol: ${{ vars.FTP_PROTOCOL || 'ftp' }}
+          port: ${{ vars.FTP_PORT || 21 }}
+          # Public URL: https://wp-plugins.enovos-data.info/enovos-ticket-shop/
+          server-dir: ${{ vars.FTP_SERVER_DIR || 'enovos-ticket-shop/' }}
+          local-dir: ./dist/upload/
