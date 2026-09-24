@@ -1140,6 +1140,61 @@ HTML;
         invoke_private(EmailTemplateEditor::class, 'concert_date', $undated_product),
         'Products without a concert date must render an empty date token.'
     );
+
+    $range_product = new \WC_Product(
+        'Nuit des Musées',
+        '<span class="price"><span class="woocommerce-Price-amount amount"><bdi>0,00 '
+        . '<span class="woocommerce-Price-currencySymbol">&euro;</span></bdi></span> &ndash; '
+        . '<span class="woocommerce-Price-amount amount"><bdi>7,00 '
+        . '<span class="woocommerce-Price-currencySymbol">&euro;</span></bdi></span>'
+        . '<span class="screen-reader-text">Price range: <span class="woocommerce-Price-amount amount">0,00 &euro;</span>'
+        . ' through <span class="woocommerce-Price-amount amount">7,00 &euro;</span></span>'
+        . ' <small class="woocommerce-price-suffix">inc. VAT</small></span>',
+        'https://example.test/product/range',
+        '',
+        0,
+        'SKU-RANGE',
+        'Description',
+        ''
+    );
+    $range_price = invoke_private(EmailTemplateEditor::class, 'email_price_html', $range_product);
+    assert_true(
+        !str_contains($range_price, 'Price range:') && !str_contains($range_price, 'through'),
+        'Variable product prices must drop the assistive price-range duplicate in emails.'
+    );
+    assert_true(
+        str_contains($range_price, '0,00') && str_contains($range_price, '7,00')
+        && str_contains($range_price, 'inc. VAT'),
+        'The visible price range and its suffix must survive the assistive-markup cleanup.'
+    );
+    assert_same(
+        1,
+        substr_count($range_price, '7,00'),
+        'The upper price amount must appear exactly once in the email price.'
+    );
+    $range_table = invoke_private(EmailTemplateEditor::class, 'new_products_html', [$range_product]);
+    assert_true(
+        !str_contains($range_table, 'Price range:'),
+        'The ready-made product table must not repeat the assistive price range.'
+    );
+
+    $assistive_only_product = new \WC_Product(
+        'Hidden price',
+        '<span class="screen-reader-text">Price range: 1,00 &euro; through 2,00 &euro;</span>',
+        'https://example.test/product/hidden',
+        '',
+        0,
+        'SKU-HIDDEN',
+        'Description',
+        ''
+    );
+    assert_true(
+        str_contains(
+            invoke_private(EmailTemplateEditor::class, 'email_price_html', $assistive_only_product),
+            'Price range:'
+        ),
+        'A price that is only assistive markup must be kept instead of rendering an empty price.'
+    );
     assert_same('publish', $GLOBALS['test_product_query']['status'], 'The product query must only include published products.');
     assert_same('catalog', $GLOBALS['test_product_query']['visibility'], 'The product query must exclude catalog-hidden products.');
     assert_same(12, $GLOBALS['test_product_query']['limit'], 'The configured product limit must reach the query.');
