@@ -75,6 +75,8 @@ Under **Enovos WooCommerce Addons > Settings > Ticket Shop** you can also enable
 
 The WooCommerce order screen can show a compact **Enovos tickets** box beside Attach Me!. It lists the assigned concert, package number, ticket pages and Enovos inventory status. Attach Me! remains responsible for the attachment list, secure customer downloads and embedding the PDF in the configured customer email.
 
+The same order screen shows the customer's ACF **Delivery** location (Esch-sur-Alzette, Creos Luxembourg-Merl, and the other select values) under Shipping, including orders with no shipping address. The value is copied onto the order at checkout so later profile changes do not rewrite past orders. Existing orders without that snapshot still read the current customer field. The location is also listed on My Account order details and in default WooCommerce order emails. Guest orders have no user field, so Delivery stays empty. The ACF placeholder `none` / `-- SELECT --` is treated as empty.
+
 Customer visibility follows **Ticket delivery status**. With the default `Completed` setting, Attach Me! registers the file on the order immediately but hides it from Order Details and My Account until the order is Completed. With `Processing`, it is visible for both Processing and Completed orders.
 
 For delivered packages, administrators can resend the configured Completed or Processing customer email. The same Attach Me! files are used again: no new package is reserved and stock does not change. Successful original and repeated deliveries can be recorded in the order notes.
@@ -102,6 +104,7 @@ The repair card under **Settings > Ticket Shop** can audit Enovos ticket attachm
 For complete code removal in a future release:
 
 - Order box + resend: remove `includes/class-enovos-order-tickets.php`, its bootstrap `require_once`, initialization and the two matching settings.
+- Order delivery location: remove `includes/class-enovos-order-delivery.php`, its bootstrap `require_once` and initialization. Existing `_enovos_delivery` order meta is left in place.
 - Delivery notes: remove `includes/class-enovos-delivery-tracking.php`, its bootstrap `require_once`, initialization and setting.
 - System check: remove `includes/class-enovos-system-check.php`, its bootstrap `require_once`, render call and setting.
 - Existing-attachment repair: remove `includes/class-enovos-attach-me-repair.php`, its bootstrap `require_once`, initialization, render call and setting.
@@ -194,7 +197,7 @@ The settings page lists every supported placeholder and highlights those relevan
 
 `{admin_order_url}` uses WooCommerce's order edit URL, so it works with both HPOS and legacy order storage. WordPress authentication and WooCommerce capabilities still protect the destination. For example: `<a href="{admin_order_url}">Order {order_number}</a>`.
 
-`{delivery}` reads the ACF `delivery` field from the order's registered customer. `{delivery_block}` renders the billing first and last name followed by that delivery value in an email-safe HTML block, matching the information used on packing slips. Guest orders have no user ACF field, so `{delivery}` is empty while `{delivery_block}` still shows the billing name.
+`{delivery}` reads the ACF `delivery` field stored on the order when available, otherwise the order's registered customer. `{delivery_block}` renders the billing first and last name followed by that delivery value in an email-safe HTML block, matching the information used on packing slips. Guest orders have no user ACF field, so `{delivery}` is empty while `{delivery_block}` still shows the billing name.
 
 Order numbers and localized dates use non-breaking spaces. `{reset_password_url}` contains the signed link that WooCommerce new-account and password-reset emails provide. `{password_reset_url}` reuses that link when it exists and otherwise issues a fresh reset key for the recipient, so it also works in emails such as the approval notification. Templates without the token never issue a key.
 

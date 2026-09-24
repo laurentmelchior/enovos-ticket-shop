@@ -429,6 +429,14 @@
   margin-bottom: 0;
 }
 
+.enovos-order-delivery {
+  margin-top: 12px;
+}
+
+.enovos-order-delivery p {
+  margin: 0 0 4px;
+}
+
 .enovos-order-ticket {
   display: grid;
   gap: 4px;

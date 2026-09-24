@@ -82,6 +82,7 @@ final class Plugin {
         DigestUnsubscribe::init();
         DigestAdmin::init();
         EmailTemplateEditor::init();
+        OrderDelivery::init();
         if (self::enabled('enable_order_ticket_box')) {
             OrderTickets::init();
         }

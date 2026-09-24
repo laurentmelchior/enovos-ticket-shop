@@ -1,5 +1,8 @@
 # Changelog
 
+## Version 0.7.20 – 2026-09-24
+- Showed the customer's ACF Delivery location on every WooCommerce order (admin shipping column, customer order details and default order emails), and stored a snapshot on the order at checkout.
+
 ## Version 0.7.19 – 2026-09-24
 - Removed the duplicated screen-reader price range from `{product_price}` and the ready-made `{new_products}` table, so variable products no longer show "Price range: … through …" next to the visible amount in emails.
 
