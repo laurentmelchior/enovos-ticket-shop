@@ -691,7 +691,7 @@ final class EmailTemplateEditor {
 
         return [
             '{product_name}' => esc_html($product->get_name()),
-            '{product_price}' => wp_kses_post($product->get_price_html()),
+            '{product_price}' => self::email_price_html($product),
             '{product_url}' => esc_url($product->get_permalink()),
             '{product_image}' => wp_kses_post($product->get_image('woocommerce_gallery_thumbnail', [
                 'style' => 'display:block;width:100px;max-width:100px;height:auto;',
@@ -703,6 +703,60 @@ final class EmailTemplateEditor {
             '{product_concert_date}' => self::concert_date($product),
             '{product_index}' => esc_html((string) $index),
         ];
+    }
+
+    /**
+     * Email clients do not load the WooCommerce stylesheet, so assistive-only
+     * markup such as the "Price range: … through …" duplicate of a variable
+     * product price would render next to the visible amount.
+     */
+    private static function email_price_html(\WC_Product $product): string {
+        $price_html = (string) $product->get_price_html();
+        $visible = self::strip_assistive_markup($price_html);
+        if (trim(wp_strip_all_tags($visible)) === '') {
+            $visible = $price_html;
+        }
+        return trim(wp_kses_post((string) preg_replace('/[ \t\r\n\f\v]+/', ' ', $visible)));
+    }
+
+    private static function strip_assistive_markup(string $html): string {
+        $offset = 0;
+        while (preg_match('/<([a-z][a-z0-9]*)\b([^>]*)>/i', $html, $matches, PREG_OFFSET_CAPTURE, $offset) === 1) {
+            $start = (int) $matches[0][1];
+            $after_open = $start + strlen($matches[0][0]);
+            if (!self::is_assistive_markup((string) $matches[2][0])) {
+                $offset = $after_open;
+                continue;
+            }
+            $end = self::closing_tag_offset($html, strtolower((string) $matches[1][0]), $after_open);
+            if ($end === null) {
+                $offset = $after_open;
+                continue;
+            }
+            $html = substr($html, 0, $start) . substr($html, $end);
+            $offset = $start;
+        }
+        return $html;
+    }
+
+    private static function is_assistive_markup(string $attributes): bool {
+        return preg_match(
+            '/\bclass\s*=\s*["\'][^"\']*\b(?:screen-reader-text|sr-only|visually-hidden|visuallyhidden)\b/i',
+            $attributes
+        ) === 1;
+    }
+
+    private static function closing_tag_offset(string $html, string $tag, int $offset): ?int {
+        $depth = 1;
+        $pattern = '/<(\/?)' . preg_quote($tag, '/') . '\b[^>]*>/i';
+        while (preg_match($pattern, $html, $matches, PREG_OFFSET_CAPTURE, $offset) === 1) {
+            $offset = (int) $matches[0][1] + strlen($matches[0][0]);
+            $depth += $matches[1][0] === '/' ? -1 : 1;
+            if ($depth === 0) {
+                return $offset;
+            }
+        }
+        return null;
     }
 
     /**
