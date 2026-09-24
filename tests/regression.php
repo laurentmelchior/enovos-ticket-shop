@@ -139,6 +139,23 @@ namespace {
             unset($item);
             return '10 EUR';
         }
+
+        public function get_meta(string $key, bool $single = true): mixed {
+            unset($single);
+            return $this->meta[$key] ?? '';
+        }
+
+        public function update_meta_data(string $key, mixed $value): void {
+            $this->meta[$key] = $value;
+        }
+
+        public function save(): void {
+        }
+
+        /**
+         * @var array<string,mixed>
+         */
+        private array $meta = [];
     }
 
     class WC_Order_Item_Product {
@@ -523,6 +540,7 @@ namespace Enovos\TicketShop {
     require_once dirname(__DIR__) . '/includes/class-enovos-ticket-ai.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-digest-unsubscribe.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-digest-admin.php';
+    require_once dirname(__DIR__) . '/includes/class-enovos-order-delivery.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-new-products.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-email-template-editor.php';
     require_once dirname(__DIR__) . '/includes/class-enovos-ticket-shop.php';
@@ -1364,6 +1382,64 @@ HTML;
         'Backstage entrance',
         DigestAdmin::render_column('', DigestAdmin::DELIVERY_COLUMN, 24),
         'The Delivery column must fall back to user meta when ACF holds no value.'
+    );
+
+    $delivery_user = new \WP_User(30, 'pickup@example.test', 'Pickup Customer');
+    $GLOBALS['test_acf_fields']['user_30']['delivery'] = 'Esch-sur-Alzette';
+    $delivery_order = new \WC_Order($delivery_user, 'Steve', 'Dahm');
+    assert_same(
+        'Esch-sur-Alzette',
+        OrderDelivery::for_order($delivery_order),
+        'Orders without saved meta must read the customer delivery field.'
+    );
+    OrderDelivery::capture_order($delivery_order);
+    assert_same(
+        'Esch-sur-Alzette',
+        $delivery_order->get_meta(OrderDelivery::META_KEY),
+        'Checkout capture must snapshot the customer delivery field on the order.'
+    );
+    $GLOBALS['test_acf_fields']['user_30']['delivery'] = 'Creos Luxembourg-Merl';
+    assert_same(
+        'Esch-sur-Alzette',
+        OrderDelivery::for_order($delivery_order),
+        'Saved order delivery must not follow later customer field changes.'
+    );
+    $GLOBALS['test_acf_fields']['user_31']['delivery'] = 'none';
+    $empty_select_order = new \WC_Order(new \WP_User(31, 'none@example.test'), 'No', 'Pickup');
+    assert_same(
+        '',
+        OrderDelivery::for_order($empty_select_order),
+        'The ACF select placeholder none must be treated as empty.'
+    );
+    $guest_delivery_order = new \WC_Order(false, 'Guest', 'Buyer');
+    assert_same(
+        '',
+        OrderDelivery::for_order($guest_delivery_order),
+        'Guest orders have no customer delivery field.'
+    );
+    ob_start();
+    OrderDelivery::render_admin($delivery_order);
+    $admin_delivery = (string) ob_get_clean();
+    assert_true(
+        str_contains($admin_delivery, 'Delivery') && str_contains($admin_delivery, 'Esch-sur-Alzette'),
+        'The order admin screen must show the snapshot delivery location under shipping.'
+    );
+    $GLOBALS['test_acf_fields']['user_32']['delivery'] = 'Creos <script>alert(1)</script> Roost';
+    $unsafe_order = new \WC_Order(new \WP_User(32, 'xss@example.test'), 'Unsafe', 'Name');
+    ob_start();
+    OrderDelivery::render_admin($unsafe_order);
+    $unsafe_admin = (string) ob_get_clean();
+    assert_true(
+        str_contains($unsafe_admin, 'Creos &lt;script&gt;alert(1)&lt;/script&gt; Roost')
+        && !str_contains($unsafe_admin, '<script>'),
+        'Order delivery output must escape the customer field.'
+    );
+    ob_start();
+    OrderDelivery::render_customer($empty_select_order);
+    assert_same(
+        '',
+        (string) ob_get_clean(),
+        'Customer order details must omit an empty delivery location.'
     );
 
     $_GET[DigestAdmin::FILTER] = 'subscribed';

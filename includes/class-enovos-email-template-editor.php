@@ -344,11 +344,7 @@ final class EmailTemplateEditor {
     }
 
     private static function order_has_esch_delivery(\WC_Order $order): bool {
-        $user = $order->get_user();
-        if (!$user instanceof \WP_User) {
-            return false;
-        }
-        $delivery = DigestAdmin::delivery($user->ID);
+        $delivery = OrderDelivery::for_order($order);
         if ($delivery === '') {
             return false;
         }
@@ -568,11 +564,7 @@ final class EmailTemplateEditor {
     }
 
     private static function order_delivery(\WC_Order $order): string {
-        $user = $order->get_user();
-        if (!$user instanceof \WP_User) {
-            return '';
-        }
-        return DigestAdmin::delivery($user->ID);
+        return OrderDelivery::for_order($order);
     }
 
     private static function delivery_block(\WC_Order $order, string $delivery): string {
